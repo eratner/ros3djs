@@ -41,10 +41,10 @@ ROS3D.RobotMarkerArrayClient = function(options) {
 	console.error('Too many markers in the latest message!');
       } else {
 	for(var j = 0; j < message.markers.length; ++j) {
-          that.currentMarkers[j].object.position.x = message.markers[j].pose.position.x;
-          that.currentMarkers[j].object.position.y = message.markers[j].pose.position.y;
-          that.currentMarkers[j].object.position.z = message.markers[j].pose.position.z;
-          that.currentMarkers[j].object.orientation = new THREE.Quaternion(
+          that.currentMarkers[j].children[0].position.x = message.markers[j].pose.position.x;
+          that.currentMarkers[j].children[0].position.y = message.markers[j].pose.position.y;
+          that.currentMarkers[j].children[0].position.z = message.markers[j].pose.position.z;
+          that.currentMarkers[j].children[0].orientation = new THREE.Quaternion(
             message.markers[j].pose.orientation.x,
             message.markers[j].pose.orientation.y,
             message.markers[j].pose.orientation.z,
