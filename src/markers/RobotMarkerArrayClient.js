@@ -1,7 +1,20 @@
 /**
- * @author Ellis Ratner
+ * @author Ellis Ratner - ellis.ratner@gmail.com
  */
 
+/**
+ * A marker array client that listens to a given marker array topic.
+ *
+ * Emits the following events:
+ *  * 'change' - there was an update or change to one of the markers
+ *
+ * @param options - object with the following keys:
+ *  * ros
+ *  * tfClient
+ *  * topic
+ *  * path (optional)
+ *  * rootObject (optional)
+ */
 ROS3D.RobotMarkerArrayClient = function(options) {
   var that = this;
   options = options || {};
@@ -19,36 +32,42 @@ ROS3D.RobotMarkerArrayClient = function(options) {
     messageType : 'visualization_msgs/MarkerArray',
     compression : 'png'
   });
+
   rosTopic.subscribe(function(message) {
     if(that.currentMarkers.length === 0) {
-      for(var i = 0; i < message.markers.length; ++i) {
-	var newMarker = new ROS3D.Marker({
-          message : message.markers[i],
-          path : that.path
-	});
+      var newMarker = null;
+      var newSceneNode = null;
 
-	var sceneNode = new ROS3D.SceneNode({
-          frameID : message.markers[i].header.frame_id,
+      for(var j = 0; j < message.markers.length; ++j) {
+        newMarker = new ROS3D.Marker({
+          message : message.markers[j],
+          path : that.path
+        });
+
+        newSceneNode = new ROS3D.SceneNode({
+          frameID : message.markers[j].header.frame_id,
           tfClient : that.tfClient,
           object : newMarker
-	});
+        });
 
-	that.rootObject.add(sceneNode);
-	that.currentMarkers.push(sceneNode);
+        that.currentMarkers.push(newSceneNode);
+        that.rootObject.add(newSceneNode);
       }
     } else {
-      if(message.markers.length > that.currentMarkers) {
-	console.error('Too many markers in the latest message!');
+      if(message.markers.length > that.currentMarkers.length) {
+        console.error('Incoming message has too many markers!');
       } else {
-	for(var j = 0; j < message.markers.length; ++j) {
-          that.currentMarkers[j].children[0].position.x = message.markers[j].pose.position.x;
-          that.currentMarkers[j].children[0].position.y = message.markers[j].pose.position.y;
-          that.currentMarkers[j].children[0].position.z = message.markers[j].pose.position.z;
-          that.currentMarkers[j].children[0].orientation = new THREE.Quaternion(
-            message.markers[j].pose.orientation.x,
-            message.markers[j].pose.orientation.y,
-            message.markers[j].pose.orientation.z,
-            message.markers[j].pose.orientation.w
+        for(var k = 0; k < that.currentMarkers.length; ++k) {
+         that.currentMarkers[k].children[0].position = new THREE.Vector3(
+            message.markers[k].pose.position.x,
+            message.markers[k].pose.position.y,
+            message.markers[k].pose.position.z
+          );
+          that.currentMarkers[k].children[0].quaternion = new THREE.Quaternion(
+            message.markers[k].pose.orientation.x,
+            message.markers[k].pose.orientation.y,
+            message.markers[k].pose.orientation.z,
+            message.markers[k].pose.orientation.w
           );
 	}
       }
