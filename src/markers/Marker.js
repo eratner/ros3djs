@@ -88,6 +88,19 @@ ROS3D.Marker = function(options) {
       cylinderMesh.scale = new THREE.Vector3(message.scale.x, message.scale.y, message.scale.z);
       this.add(cylinderMesh);
       break;
+    case ROS3D.MARKER_LINE_STRIP:
+      console.log('displaying line strip');
+      var lineStripGeometry = new THREE.Geometry();
+      for(var k = 0; k < message.points.length; ++k)
+      {
+	var position = new THREE.Vector3(message.points[k].x,
+                                         message.points[k].y,
+                                         message.points[k].z);
+	lineStripGeometry.vertices.push(position);
+      }
+      var lineStrip = new THREE.Line(lineStripGeometry, colorMaterial, THREE.LineStrip);
+      this.add(lineStrip);
+      break;
     case ROS3D.MARKER_CUBE_LIST:
       // holds the main object
       var object = new THREE.Object3D();
