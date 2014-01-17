@@ -57,7 +57,7 @@ ROS3D.MeshResource = function(options) {
           }
         };
 
-        console.log('Coloring collada mesh resource ' + resource);
+        //console.log('Coloring collada mesh resource ' + resource);
         setMaterial(collada.scene, material);
       }
 

@@ -72,7 +72,7 @@ ROS3D.Marker = function(options) {
       break;
     case ROS3D.MARKER_SPHERE:
       // set the sphere dimensions
-      var sphereGeom = new THREE.SphereGeometry(0.5);
+        var sphereGeom = new THREE.SphereGeometry(0.5);
       var sphereMesh = new THREE.Mesh(sphereGeom, colorMaterial);
       sphereMesh.scale.x = message.scale.x;
       sphereMesh.scale.y = message.scale.y;
@@ -89,16 +89,15 @@ ROS3D.Marker = function(options) {
       this.add(cylinderMesh);
       break;
     case ROS3D.MARKER_LINE_STRIP:
-      console.log('displaying line strip');
       var lineStripGeometry = new THREE.Geometry();
-      for(var k = 0; k < message.points.length; ++k)
-      {
+      for(var k = 0; k < message.points.length; ++k) {
 	var position = new THREE.Vector3(message.points[k].x,
                                          message.points[k].y,
                                          message.points[k].z);
 	lineStripGeometry.vertices.push(position);
       }
       var lineStrip = new THREE.Line(lineStripGeometry, colorMaterial, THREE.LineStrip);
+      lineStrip.scale = new THREE.Vector3(message.scale.x, message.scale.x, message.scale.x);
       this.add(lineStrip);
       break;
     case ROS3D.MARKER_CUBE_LIST:
@@ -196,11 +195,28 @@ ROS3D.Marker = function(options) {
          message.color.b !== 0 || message.color.a !== 0) {
         meshColorMaterial = colorMaterial;
       }
+      var meshPath = path;
+      var resourceLocation = '';
+      // if the mesh resource URL is absolute and the path has not been set,
+      // do not force it to be relative
+      if(message.mesh_resource.substr(0, 7) === 'http://') {
+	var index = 0;
+	for(index = 7; index < message.mesh_resource.length; index++) {
+          if(message.mesh_resource.substr(index, 1) === '/') {
+            break;
+          }
+        }
+        meshPath = message.mesh_resource.substr(0, index + 1);
+        resourceLocation = message.mesh_resource.substr(index + 1);
+      } else {
+        resourceLocation = message.mesh_resource.substr(10);
+      }
       var meshResource = new ROS3D.MeshResource({
-        path : path,
-        resource : message.mesh_resource.substr(10),
+        path : meshPath,
+        resource : resourceLocation,
         material : meshColorMaterial
       });
+      meshResource.scale = new THREE.Vector3(message.scale.x, message.scale.y, message.scale.z);
       this.add(meshResource);
       break;
     case ROS3D.MARKER_TRIANGLE_LIST:

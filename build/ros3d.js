@@ -1226,6 +1226,10 @@ ROS3D.InteractiveMarkerHandle.prototype.setPoseFromClient = function(event) {
   this.pose = new ROSLIB.Pose(event);
   var inv = this.tfTransform.clone();
   inv.rotation.invert();
+  inv.translation.multiplyQuaternion(inv.rotation);
+  inv.translation.x *= -1;
+  inv.translation.y *= -1;
+  inv.translation.z *= -1;
   this.pose.applyTransform(inv);
 
   // send feedback to the server
@@ -1700,7 +1704,7 @@ ROS3D.Marker = function(options) {
       break;
     case ROS3D.MARKER_SPHERE:
       // set the sphere dimensions
-      var sphereGeom = new THREE.SphereGeometry(0.5);
+        var sphereGeom = new THREE.SphereGeometry(0.5);
       var sphereMesh = new THREE.Mesh(sphereGeom, colorMaterial);
       sphereMesh.scale.x = message.scale.x;
       sphereMesh.scale.y = message.scale.y;
@@ -1715,6 +1719,18 @@ ROS3D.Marker = function(options) {
       cylinderMesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * 0.5);
       cylinderMesh.scale = new THREE.Vector3(message.scale.x, message.scale.y, message.scale.z);
       this.add(cylinderMesh);
+      break;
+    case ROS3D.MARKER_LINE_STRIP:
+      var lineStripGeometry = new THREE.Geometry();
+      for(var k = 0; k < message.points.length; ++k) {
+	var position = new THREE.Vector3(message.points[k].x,
+                                         message.points[k].y,
+                                         message.points[k].z);
+	lineStripGeometry.vertices.push(position);
+      }
+      var lineStrip = new THREE.Line(lineStripGeometry, colorMaterial, THREE.LineStrip);
+      lineStrip.scale = new THREE.Vector3(message.scale.x, message.scale.x, message.scale.x);
+      this.add(lineStrip);
       break;
     case ROS3D.MARKER_CUBE_LIST:
       // holds the main object
@@ -1806,10 +1822,34 @@ ROS3D.Marker = function(options) {
       break;
     case ROS3D.MARKER_MESH_RESOURCE:
       // load and add the mesh
-      this.add(new ROS3D.MeshResource({
-        path : path,
-        resource : message.mesh_resource.substr(10)
-      }));
+      var meshColorMaterial = null;
+      if(message.color.r !== 0 || message.color.g !== 0 ||
+         message.color.b !== 0 || message.color.a !== 0) {
+        meshColorMaterial = colorMaterial;
+      }
+      var meshPath = path;
+      var resourceLocation = '';
+      // if the mesh resource URL is absolute and the path has not been set,
+      // do not force it to be relative
+      if(message.mesh_resource.substr(0, 7) === 'http://') {
+	var index = 0;
+	for(index = 7; index < message.mesh_resource.length; index++) {
+          if(message.mesh_resource.substr(index, 1) === '/') {
+            break;
+          }
+        }
+        meshPath = message.mesh_resource.substr(0, index + 1);
+        resourceLocation = message.mesh_resource.substr(index + 1);
+      } else {
+        resourceLocation = message.mesh_resource.substr(10);
+      }
+      var meshResource = new ROS3D.MeshResource({
+        path : meshPath,
+        resource : resourceLocation,
+        material : meshColorMaterial
+      });
+      meshResource.scale = new THREE.Vector3(message.scale.x, message.scale.y, message.scale.z);
+      this.add(meshResource);
       break;
     case ROS3D.MARKER_TRIANGLE_LIST:
       // create the list of triangles
@@ -1848,6 +1888,95 @@ ROS3D.Marker.prototype.setPose = function(pose) {
   this.updateMatrixWorld();
 };
 
+/**
+ * @author Ellis Ratner - ellis.ratner@gmail.com
+ */
+
+/**
+ * A marker array client that listens to a given marker array topic.
+ *
+ * Emits the following events:
+ *  * 'change' - there was an update or change to one of the markers
+ *
+ * @param options - object with the following keys:
+ *  * ros
+ *  * tfClient
+ *  * topic
+ *  * path (optional)
+ *  * rootObject (optional)
+ */
+ROS3D.MarkerArrayClient = function(options) {
+  var that = this;
+  options = options || {};
+  var ros = options.ros;
+  var topic = options.topic;
+  this.path = options.path || '/';
+  this.tfClient = options.tfClient;
+  this.rootObject = options.rootObject || new THREE.Object3D();
+
+  this.currentMarkers = [];
+
+  var rosTopic = new ROSLIB.Topic({
+    ros : ros,
+    name : topic,
+    messageType : 'visualization_msgs/MarkerArray',
+    compression : 'png'
+  });
+
+  rosTopic.subscribe(function(message) {
+    // Process each marker in the marker array message
+    message.markers.forEach(function(marker) {
+      switch(marker.action) {
+      case 0: // ADD
+        // Marker already exists, so update its properties
+        if(that.currentMarkers[[marker.ns, marker.id]]) {
+          //console.log('[mac] updating marker with id ' + marker.id.toString() + ' and namespace ' + marker.ns);
+          // Update the pose
+          that.currentMarkers[[marker.ns, marker.id]].children[0].position = new THREE.Vector3(
+            marker.pose.position.x,
+            marker.pose.position.y,
+            marker.pose.position.z
+          );
+          that.currentMarkers[[marker.ns, marker.id]].children[0].quaternion = new THREE.Quaternion(
+            marker.pose.orientation.x,
+            marker.pose.orientation.y,
+            marker.pose.orientation.z,
+            marker.pose.orientation.w
+          );
+          // @todo update other relevant properties
+	} else {
+          //console.log('[mac] adding marker with id ' + marker.id.toString() + ' and namespace ' + marker.ns);
+          // Marker does not exist, so add it
+          var newMarker = new ROS3D.Marker({
+            message : marker,
+            path : that.path
+          });
+          var node = new ROS3D.SceneNode({
+            frameID : marker.header.frame_id,
+            tfClient : that.tfClient,
+            object : newMarker
+          });
+          that.currentMarkers[[marker.ns, marker.id]] = node;
+          that.rootObject.add(node);
+        }
+	break;
+      case 1: // MODIFY
+	// @todo deprecated?
+	break;
+      case 2: // DELETE
+	// Can only delete it if it exists already
+	if(that.currentMarkers[[marker.ns, marker.id]]) {
+          //console.log('[mac] deleting marker with id ' + marker.id.toString() + ' and namespace ' + marker.ns);
+          that.rootObject.remove(that.currentMarkers[[marker.ns, marker.id]]);
+          that.currentMarkers[[marker.ns, marker.id]] = null;
+        }
+        break;
+      }
+    });
+    that.emit('change');
+  });
+};
+ROS3D.MarkerArrayClient.prototype.__proto__ = EventEmitter2.prototype;
 /**
  * @author Russell Toris - rctoris@wpi.edu
  */
@@ -1904,6 +2033,187 @@ ROS3D.MarkerClient = function(options) {
 };
 ROS3D.MarkerClient.prototype.__proto__ = EventEmitter2.prototype;
 
+/**
+ * @author Ellis Ratner - eratner@bowdoin.edu
+ */
+
+/**
+ * A marker client that listens to a given marker topic.
+ *
+ * Emits the following events:
+ *  * 'change' - there was an update or change in the markers
+ *
+ * @constructor
+ * @param options - object with following keys:
+ *   * ros - the ROSLIB.Ros connection handle
+ *   * topic - the marker topic to listen to
+ *   * tfClient - the TF client handle to use
+ *   * rootObject (optional) - the root object to add markers to
+ */
+ROS3D.MultiMarkerClient = function(options) {
+  var that = this;
+  options = options || {};
+  var ros = options.ros;
+  var topic = options.topic;
+  this.tfClient = options.tfClient;
+  this.rootObject = options.rootObject || new THREE.Object3D();
+
+  // a dictionary of the currently displayed markers
+  this.currentMarkers = [];
+
+  // subscribe to the topic
+  var rosTopic = new ROSLIB.Topic({
+    ros : ros,
+    name : topic,
+    messageType : 'visualization_msgs/Marker',
+    compression : 'png'
+  });
+  rosTopic.subscribe(function(message) {
+    if(that.currentMarkers[[message.ns, message.id]] && message.action === 2) {
+      // a marker with this id and namespace already exists; delete it.
+      //console.log('deleting marker with namespace\'' + message.ns + '\' and id ' + message.id + '.');
+      that.rootObject.remove(that.currentMarkers[[message.ns, message.id]]);
+      that.currentMarkers[[message.ns, message.id]] = null;
+      that.emit('change');
+    } else {
+      if(that.currentMarkers[[message.ns, message.id]]) {
+	// if the marker already exists, update the pose
+	//console.log('marker ' + message.id + ' already exists; updating its pose.');
+        that.currentMarkers[[message.ns, message.id]].children[0].position = new THREE.Vector3(
+          message.pose.position.x,
+          message.pose.position.y,
+          message.pose.position.z
+        );
+        that.currentMarkers[[message.ns, message.id]].children[0].quaternion = new THREE.Quaternion(
+          message.pose.orientation.x,
+          message.pose.orientation.y,
+          message.pose.orientation.z,
+          message.pose.orientation.w
+        );
+	that.emit('change');
+      } else {
+	if(message.action === 2) {
+          console.log('does not exist, but action is delete');
+          return;
+	}
+	// otherwise, add it to the scene
+	//console.log('adding new marker ' + message.id + '.');
+	var newMarker = new ROS3D.Marker({
+          message : message
+	});
+	var node = new ROS3D.SceneNode({
+          frameID : message.header.frame_id,
+          tfClient : that.tfClient,
+          object : newMarker
+	});
+	that.currentMarkers[[message.ns, message.id]] = node;
+        that.rootObject.add(node);
+
+	// If the marker has a timeout, delete when necessary
+	if(parseInt(message.lifetime.secs, 10) !== 0) {
+          var lifetime = parseInt(message.lifetime.secs, 10);
+          console.log('Lifetime: ' + lifetime);
+          if(lifetime > 0) {
+            console.log('Removing marker after lifetime ' +
+                        lifetime);
+              var removeMarker = window.setInterval(function() {
+              console.log('Time\'s up! removing marker');
+              that.rootObject.remove(that.currentMarkers[[message.ns, message.id]]);
+              that.currentMarkers[[message.ns, message.id]] = null;
+              that.emit('change');
+              clearInterval(removeMarker);
+            }, lifetime);
+          } else {
+            console.log('Error: marker has invalid lifetime ' +
+                        lifetime);
+          }
+	}
+
+	that.emit('change');
+      }
+    }
+  });
+};
+ROS3D.MultiMarkerClient.prototype.__proto__ = EventEmitter2.prototype;
+
+/**
+ * @author Ellis Ratner - ellis.ratner@gmail.com
+ */
+
+/**
+ * A marker array client that listens to a given marker array topic.
+ *
+ * Emits the following events:
+ *  * 'change' - there was an update or change to one of the markers
+ *
+ * @param options - object with the following keys:
+ *  * ros
+ *  * tfClient
+ *  * topic
+ *  * path (optional)
+ *  * rootObject (optional)
+ */
+ROS3D.RobotMarkerArrayClient = function(options) {
+  var that = this;
+  options = options || {};
+  var ros = options.ros;
+  var topic = options.topic;
+  this.path = options.path || '/';
+  this.tfClient = options.tfClient;
+  this.rootObject = options.rootObject || new THREE.Object3D();
+
+  this.currentMarkers = [];
+
+  var rosTopic = new ROSLIB.Topic({
+    ros : ros,
+    name : topic,
+    messageType : 'visualization_msgs/MarkerArray',
+    compression : 'png'
+  });
+
+  rosTopic.subscribe(function(message) {
+    if(that.currentMarkers.length === 0) {
+      var newMarker = null;
+      var newSceneNode = null;
+
+      for(var j = 0; j < message.markers.length; ++j) {
+        newMarker = new ROS3D.Marker({
+          message : message.markers[j],
+          path : that.path
+        });
+
+        newSceneNode = new ROS3D.SceneNode({
+          frameID : message.markers[j].header.frame_id,
+          tfClient : that.tfClient,
+          object : newMarker
+        });
+
+        that.currentMarkers.push(newSceneNode);
+        that.rootObject.add(newSceneNode);
+      }
+    } else {
+      if(message.markers.length > that.currentMarkers.length) {
+        console.error('Incoming message has too many markers!');
+      } else {
+        for(var k = 0; k < that.currentMarkers.length; ++k) {
+         that.currentMarkers[k].children[0].position = new THREE.Vector3(
+            message.markers[k].pose.position.x,
+            message.markers[k].pose.position.y,
+            message.markers[k].pose.position.z
+          );
+          that.currentMarkers[k].children[0].quaternion = new THREE.Quaternion(
+            message.markers[k].pose.orientation.x,
+            message.markers[k].pose.orientation.y,
+            message.markers[k].pose.orientation.z,
+            message.markers[k].pose.orientation.w
+          );
+	}
+      }
+    }
+    that.emit('change');
+  });
+};
+ROS3D.RobotMarkerArrayClient.prototype.__proto__ = EventEmitter2.prototype;
 /**
  * @author David Gossow - dgossow@willowgarage.com
  */
@@ -2100,6 +2410,7 @@ ROS3D.Grid.prototype.__proto__ = THREE.Mesh.prototype;
  * @param options - object with following keys:
  *  * path (optional) - the base path to the associated models that will be loaded
  *  * resource - the resource file name to load
+ *  * material - @todo
  *  * warnings (optional) - if warnings should be printed
  */
 ROS3D.MeshResource = function(options) {
@@ -2107,6 +2418,7 @@ ROS3D.MeshResource = function(options) {
   options = options || {};
   var path = options.path || '/';
   var resource = options.resource;
+  var material = options.material;
   this.warnings = options.warnings;
 
   THREE.Object3D.call(this);
@@ -2133,6 +2445,21 @@ ROS3D.MeshResource = function(options) {
         var scale = collada.dae.asset.unit;
         collada.scene.scale = new THREE.Vector3(scale, scale, scale);
       }
+
+      if(material !== null) {
+        var setMaterial = function(node, material) {
+          node.material = material;
+          if (node.children) {
+            for (var i = 0; i < node.children.length; i++) {
+              setMaterial(node.children[i], material);
+            }
+          }
+        };
+
+        //console.log('Coloring collada mesh resource ' + resource);
+        setMaterial(collada.scene, material);
+      }
+
       that.add(collada.scene);
     });
   }
