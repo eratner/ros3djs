@@ -2017,7 +2017,16 @@ ROS3D.MarkerArrayClient = function(options) {
 	// Can only delete it if it exists already
 	if(that.currentMarkers[[marker.ns, marker.id]]) {
           //console.log('[mac] deleting marker with id ' + marker.id.toString() + ' and namespace ' + marker.ns);
-          that.rootObject.remove(that.currentMarkers[[marker.ns, marker.id]]);
+          //dispose object properly (http://stackoverflow.com/questions/14650716/deallocating-object3d)
+          var currentNode = that.currentMarkers[[marker.ns, marker.id]];
+          currentNode.traverse(function(child) {
+            if (child.geometry !== undefined) {
+              child.geometry.dispose();
+              //child.material.dispose(); //no need for this since material is shared among other objects
+            }
+          });
+          currentNode.unsubscribe();
+          that.rootObject.remove(currentNode);
           that.currentMarkers[[marker.ns, marker.id]] = null;
           delete that.currentMarkers[[marker.ns, marker.id]];
         }
@@ -2644,8 +2653,8 @@ ROS3D.UrdfClient = function(options) {
 ROS3D.SceneNode = function(options) {
   options = options || {};
   var that = this;
-  var tfClient = options.tfClient;
-  var frameID = options.frameID;
+  var tfClient = this.tfClient = options.tfClient;
+  var frameID = this.frameID = options.frameID;
   var object = options.object;
   this.pose = options.pose || new ROSLIB.Pose();
 
@@ -2659,7 +2668,7 @@ ROS3D.SceneNode = function(options) {
   this.updatePose(this.pose);
 
   // listen for TF updates
-  tfClient.subscribe(frameID, function(msg) {
+  tfClient.subscribe(frameID, this.callback = function(msg) {
 
     // apply the transform
     var tf = new ROSLIB.Transform(msg);
@@ -2670,6 +2679,15 @@ ROS3D.SceneNode = function(options) {
     that.updatePose(poseTransformed);
   });
 };
+
+ROS3D.SceneNode.prototype.unsubscribe = function() {
+  var frameID = this.frameID;
+  if (frameID[0] === '/') {
+    frameID = frameID.substring(1);
+  }
+  this.tfClient.unsubscribe(frameID, this.callback);
+};
+
 ROS3D.SceneNode.prototype.__proto__ = THREE.Object3D.prototype;
 
 /**
