@@ -1979,61 +1979,6 @@ ROS3D.MarkerArrayClient = function(options) {
 ROS3D.MarkerArrayClient.prototype.__proto__ = EventEmitter2.prototype;
 /**
  * @author Russell Toris - rctoris@wpi.edu
- */
-
-/**
- * A marker client that listens to a given marker topic.
- *
- * Emits the following events:
- *  * 'change' - there was an update or change in the marker
- *
- * @constructor
- * @param options - object with following keys:
- *   * ros - the ROSLIB.Ros connection handle
- *   * topic - the marker topic to listen to
- *   * tfClient - the TF client handle to use
- *   * rootObject (optional) - the root object to add this marker to
- */
-ROS3D.MarkerClient = function(options) {
-  var that = this;
-  options = options || {};
-  var ros = options.ros;
-  var topic = options.topic;
-  this.tfClient = options.tfClient;
-  this.rootObject = options.rootObject || new THREE.Object3D();
-
-  // Markers that are displayed (Map id--Marker)
-  this.markers = {};
-
-  // subscribe to the topic
-  var rosTopic = new ROSLIB.Topic({
-    ros : ros,
-    name : topic,
-    messageType : 'visualization_msgs/Marker',
-    compression : 'png'
-  });
-  rosTopic.subscribe(function(message) {
-
-    var newMarker = new ROS3D.Marker({
-      message : message
-    });
-
-    // remove old marker from Three.Object3D children buffer
-    that.rootObject.remove(that.markers[message.id]);
-
-    that.markers[message.id] = new ROS3D.SceneNode({
-      frameID : message.header.frame_id,
-      tfClient : that.tfClient,
-      object : newMarker
-    });
-    that.rootObject.add(that.markers[message.id]);
-
-    that.emit('change');
-  });
-};
-ROS3D.MarkerClient.prototype.__proto__ = EventEmitter2.prototype;
-
-/**
  * @author Ellis Ratner - eratner@bowdoin.edu
  */
 
@@ -2050,7 +1995,7 @@ ROS3D.MarkerClient.prototype.__proto__ = EventEmitter2.prototype;
  *   * tfClient - the TF client handle to use
  *   * rootObject (optional) - the root object to add markers to
  */
-ROS3D.MultiMarkerClient = function(options) {
+ROS3D.MarkerClient = function(options) {
   var that = this;
   options = options || {};
   var ros = options.ros;
@@ -2074,6 +2019,11 @@ ROS3D.MultiMarkerClient = function(options) {
       //console.log('deleting marker with namespace\'' + message.ns + '\' and id ' + message.id + '.');
       that.rootObject.remove(that.currentMarkers[[message.ns, message.id]]);
       that.currentMarkers[[message.ns, message.id]] = null;
+      delete that.currentMarkers[[message.ns, message.id]];
+      console.log('after deleting: ');
+      for(var key in that.currentMarkers) {
+        console.log(key + ': ' + that.currentMarkers[key]);
+      }
       that.emit('change');
     } else {
       if(that.currentMarkers[[message.ns, message.id]]) {
@@ -2093,7 +2043,7 @@ ROS3D.MultiMarkerClient = function(options) {
 	that.emit('change');
       } else {
 	if(message.action === 2) {
-          console.log('does not exist, but action is delete');
+          //console.log('does not exist, but action is delete');
           return;
 	}
 	// otherwise, add it to the scene
@@ -2109,17 +2059,24 @@ ROS3D.MultiMarkerClient = function(options) {
 	that.currentMarkers[[message.ns, message.id]] = node;
         that.rootObject.add(node);
 
+	//console.log('NUM MARKERS = ' + Object.keys(that.currentMarkers).length);
+
 	// If the marker has a timeout, delete when necessary
 	if(parseInt(message.lifetime.secs, 10) !== 0) {
           var lifetime = parseInt(message.lifetime.secs, 10);
-          console.log('Lifetime: ' + lifetime);
+          //console.log('Lifetime: ' + lifetime);
           if(lifetime > 0) {
-            console.log('Removing marker after lifetime ' +
-                        lifetime);
+            // console.log('Removing marker after lifetime ' +
+            //             lifetime);
               var removeMarker = window.setInterval(function() {
               console.log('Time\'s up! removing marker');
               that.rootObject.remove(that.currentMarkers[[message.ns, message.id]]);
               that.currentMarkers[[message.ns, message.id]] = null;
+              delete that.currentMarkers[[message.ns, message.id]];
+              console.log('after deleting: ');
+              for(var key in that.currentMarkers) {
+                console.log(key + ': ' + that.currentMarkers[key]);
+              }
               that.emit('change');
               clearInterval(removeMarker);
             }, lifetime);
@@ -2134,86 +2091,8 @@ ROS3D.MultiMarkerClient = function(options) {
     }
   });
 };
-ROS3D.MultiMarkerClient.prototype.__proto__ = EventEmitter2.prototype;
+ROS3D.MarkerClient.prototype.__proto__ = EventEmitter2.prototype;
 
-/**
- * @author Ellis Ratner - ellis.ratner@gmail.com
- */
-
-/**
- * A marker array client that listens to a given marker array topic.
- *
- * Emits the following events:
- *  * 'change' - there was an update or change to one of the markers
- *
- * @param options - object with the following keys:
- *  * ros
- *  * tfClient
- *  * topic
- *  * path (optional)
- *  * rootObject (optional)
- */
-ROS3D.RobotMarkerArrayClient = function(options) {
-  var that = this;
-  options = options || {};
-  var ros = options.ros;
-  var topic = options.topic;
-  this.path = options.path || '/';
-  this.tfClient = options.tfClient;
-  this.rootObject = options.rootObject || new THREE.Object3D();
-
-  this.currentMarkers = [];
-
-  var rosTopic = new ROSLIB.Topic({
-    ros : ros,
-    name : topic,
-    messageType : 'visualization_msgs/MarkerArray',
-    compression : 'png'
-  });
-
-  rosTopic.subscribe(function(message) {
-    if(that.currentMarkers.length === 0) {
-      var newMarker = null;
-      var newSceneNode = null;
-
-      for(var j = 0; j < message.markers.length; ++j) {
-        newMarker = new ROS3D.Marker({
-          message : message.markers[j],
-          path : that.path
-        });
-
-        newSceneNode = new ROS3D.SceneNode({
-          frameID : message.markers[j].header.frame_id,
-          tfClient : that.tfClient,
-          object : newMarker
-        });
-
-        that.currentMarkers.push(newSceneNode);
-        that.rootObject.add(newSceneNode);
-      }
-    } else {
-      if(message.markers.length > that.currentMarkers.length) {
-        console.error('Incoming message has too many markers!');
-      } else {
-        for(var k = 0; k < that.currentMarkers.length; ++k) {
-         that.currentMarkers[k].children[0].position = new THREE.Vector3(
-            message.markers[k].pose.position.x,
-            message.markers[k].pose.position.y,
-            message.markers[k].pose.position.z
-          );
-          that.currentMarkers[k].children[0].quaternion = new THREE.Quaternion(
-            message.markers[k].pose.orientation.x,
-            message.markers[k].pose.orientation.y,
-            message.markers[k].pose.orientation.z,
-            message.markers[k].pose.orientation.w
-          );
-	}
-      }
-    }
-    that.emit('change');
-  });
-};
-ROS3D.RobotMarkerArrayClient.prototype.__proto__ = EventEmitter2.prototype;
 /**
  * @author David Gossow - dgossow@willowgarage.com
  */

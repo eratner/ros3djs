@@ -79,6 +79,7 @@ ROS3D.MarkerArrayClient = function(options) {
           //console.log('[mac] deleting marker with id ' + marker.id.toString() + ' and namespace ' + marker.ns);
           that.rootObject.remove(that.currentMarkers[[marker.ns, marker.id]]);
           that.currentMarkers[[marker.ns, marker.id]] = null;
+          delete that.currentMarkers[[marker.ns, marker.id]];
         }
         break;
       }
