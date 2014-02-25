@@ -88,6 +88,7 @@ ROS3D.MarkerArrayClient = function(options) {
           currentNode.unsubscribe();
           that.rootObject.remove(currentNode);
           that.currentMarkers[[marker.ns, marker.id]] = null;
+          delete that.currentMarkers[[marker.ns, marker.id]];
         }
         break;
       }
