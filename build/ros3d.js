@@ -1721,16 +1721,66 @@ ROS3D.Marker = function(options) {
       this.add(cylinderMesh);
       break;
     case ROS3D.MARKER_LINE_STRIP:
-      var lineStripGeometry = new THREE.Geometry();
-      for(var k = 0; k < message.points.length; ++k) {
-	var position = new THREE.Vector3(message.points[k].x,
-                                         message.points[k].y,
-                                         message.points[k].z);
-	lineStripGeometry.vertices.push(position);
+      var lineStripGeom = new THREE.Geometry();
+      var lineStripMaterial = new THREE.LineBasicMaterial({
+        size : message.scale.x
+      });
+
+      // add the points
+      var j;
+      for ( j = 0; j < message.points.length; j++) {
+        var pt = new THREE.Vector3();
+        pt.x = message.points[j].x;
+        pt.y = message.points[j].y;
+        pt.z = message.points[j].z;
+        lineStripGeom.vertices.push(pt);
       }
-      var lineStrip = new THREE.Line(lineStripGeometry, colorMaterial, THREE.LineStrip);
-      lineStrip.scale = new THREE.Vector3(message.scale.x, message.scale.x, message.scale.x);
-      this.add(lineStrip);
+
+      // determine the colors for each
+      if (message.colors.length === message.points.length) {
+        lineStripMaterial.vertexColors = true;
+        for ( j = 0; j < message.points.length; j++) {
+          var clr = new THREE.Color();
+          clr.setRGB(message.colors[j].r, message.colors[j].g, message.colors[j].b);
+          lineStripGeom.colors.push(clr);
+        }
+      } else {
+        lineStripMaterial.color.setRGB(message.color.r, message.color.g, message.color.b);
+      }
+
+      // add the line
+      this.add(new THREE.Line(lineStripGeom, lineStripMaterial));
+      break;
+    case ROS3D.MARKER_LINE_LIST:
+      var lineListGeom = new THREE.Geometry();
+      var lineListMaterial = new THREE.LineBasicMaterial({
+        size : message.scale.x
+      });
+
+      // add the points
+      var k;
+      for ( k = 0; k < message.points.length; k++) {
+        var v = new THREE.Vector3();
+        v.x = message.points[k].x;
+        v.y = message.points[k].y;
+        v.z = message.points[k].z;
+        lineListGeom.vertices.push(v);
+      }
+
+      // determine the colors for each
+      if (message.colors.length === message.points.length) {
+        lineListMaterial.vertexColors = true;
+        for ( k = 0; k < message.points.length; k++) {
+          var c = new THREE.Color();
+          c.setRGB(message.colors[k].r, message.colors[k].g, message.colors[k].b);
+          lineListGeom.colors.push(c);
+        }
+      } else {
+        lineListMaterial.color.setRGB(message.color.r, message.color.g, message.color.b);
+      }
+
+      // add the line
+      this.add(new THREE.Line(lineListGeom, lineListMaterial,THREE.LinePieces));
       break;
     case ROS3D.MARKER_CUBE_LIST:
       // holds the main object
@@ -1969,6 +2019,7 @@ ROS3D.MarkerArrayClient = function(options) {
           //console.log('[mac] deleting marker with id ' + marker.id.toString() + ' and namespace ' + marker.ns);
           that.rootObject.remove(that.currentMarkers[[marker.ns, marker.id]]);
           that.currentMarkers[[marker.ns, marker.id]] = null;
+          delete that.currentMarkers[[marker.ns, marker.id]];
         }
         break;
       }
@@ -1977,6 +2028,7 @@ ROS3D.MarkerArrayClient = function(options) {
   });
 };
 ROS3D.MarkerArrayClient.prototype.__proto__ = EventEmitter2.prototype;
+
 /**
  * @author Russell Toris - rctoris@wpi.edu
  * @author Ellis Ratner - eratner@bowdoin.edu
@@ -2020,10 +2072,6 @@ ROS3D.MarkerClient = function(options) {
       that.rootObject.remove(that.currentMarkers[[message.ns, message.id]]);
       that.currentMarkers[[message.ns, message.id]] = null;
       delete that.currentMarkers[[message.ns, message.id]];
-      console.log('after deleting: ');
-      for(var key in that.currentMarkers) {
-        console.log(key + ': ' + that.currentMarkers[key]);
-      }
       that.emit('change');
     } else {
       if(that.currentMarkers[[message.ns, message.id]]) {
@@ -2073,10 +2121,6 @@ ROS3D.MarkerClient = function(options) {
               that.rootObject.remove(that.currentMarkers[[message.ns, message.id]]);
               that.currentMarkers[[message.ns, message.id]] = null;
               delete that.currentMarkers[[message.ns, message.id]];
-              console.log('after deleting: ');
-              for(var key in that.currentMarkers) {
-                console.log(key + ': ' + that.currentMarkers[key]);
-              }
               that.emit('change');
               clearInterval(removeMarker);
             }, lifetime);
@@ -2255,18 +2299,20 @@ ROS3D.Axes.prototype.__proto__ = THREE.Object3D.prototype;
  *
  * @constructor
  * @param options - object with following keys:
- *  * size (optional) - the size of the grid
+ *  * size (optional) - The number of cells of the grid
  *  * color (optional) - the line color of the grid, like '#cccccc'
  *  * lineWidth (optional) - the width of the lines in the grid
+ *  * cellSize (optional) - The length, in meters, of the side of each cell
  */
 ROS3D.Grid = function(options) {
   options = options || {};
-  var size = options.size || 50;
+  var size = options.size || 10;
   var color = options.color || '#cccccc';
   var lineWidth = options.lineWidth || 1;
+  var cellSize = options.cellSize || 1;
 
   // create the mesh
-  THREE.Mesh.call(this, new THREE.PlaneGeometry(size, size, size, size),
+  THREE.Mesh.call(this, new THREE.PlaneGeometry(size*cellSize, size*cellSize, size, size),
       new THREE.MeshBasicMaterial({
         color : color,
         wireframe : true,
@@ -2482,6 +2528,45 @@ ROS3D.Urdf = function(options) {
             object : mesh
           });
           this.add(sceneNode);
+        } else {
+          var colorMaterial, shapeMesh;
+          // Save frameID
+          var newFrameID = '/' + link.name;
+          // Save color material
+          var color = link.visual.material.color;
+          if (color === null) {
+            colorMaterial = ROS3D.makeColorMaterial(0, 0, 0, 1);
+          } else {
+            colorMaterial = ROS3D.makeColorMaterial(color.r, color.g, color.b, color.a);
+          }
+          // Create a shape
+          switch (link.visual.geometry.type) {
+              case ROSLIB.URDF_BOX:
+                  var dimension = link.visual.geometry.dimension;
+                  var cube = new THREE.CubeGeometry(dimension.x, dimension.y, dimension.z);
+                  shapeMesh = new THREE.Mesh(cube, colorMaterial);
+                  break;
+              case ROSLIB.URDF_CYLINDER:
+                  var radius = link.visual.geometry.radius;
+                  var length = link.visual.geometry.length;
+                  var cylinder = new THREE.CylinderGeometry(radius, radius, length, 16, 1, false);
+                  shapeMesh = new THREE.Mesh(cylinder, colorMaterial);
+                  shapeMesh.useQuaternion = true;
+                  shapeMesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * 0.5);
+                  break;
+              case ROSLIB.URDF_SPHERE:
+                  var sphere = new THREE.SphereGeometry(link.visual.geometry.radius, 16);
+                  shapeMesh = new THREE.Mesh(sphere, colorMaterial);
+                  break;
+          }
+          // Create a scene node with the shape
+          var scene = new ROS3D.SceneNode({
+              frameID: newFrameID,
+              pose: link.visual.origin,
+              tfClient: tfClient,
+              object: shapeMesh
+          });
+          this.add(scene);
         }
       }
     }
