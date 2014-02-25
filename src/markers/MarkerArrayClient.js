@@ -77,7 +77,16 @@ ROS3D.MarkerArrayClient = function(options) {
 	// Can only delete it if it exists already
 	if(that.currentMarkers[[marker.ns, marker.id]]) {
           //console.log('[mac] deleting marker with id ' + marker.id.toString() + ' and namespace ' + marker.ns);
-          that.rootObject.remove(that.currentMarkers[[marker.ns, marker.id]]);
+          //dispose object properly (http://stackoverflow.com/questions/14650716/deallocating-object3d)
+          var currentNode = that.currentMarkers[[marker.ns, marker.id]];
+          currentNode.traverse(function(child) {
+            if (child.geometry !== undefined) {
+              child.geometry.dispose();
+              //child.material.dispose(); //no need for this since material is shared among other objects
+            }
+          });
+          currentNode.unsubscribe();
+          that.rootObject.remove(currentNode);
           that.currentMarkers[[marker.ns, marker.id]] = null;
         }
         break;

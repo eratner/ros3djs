@@ -1967,7 +1967,16 @@ ROS3D.MarkerArrayClient = function(options) {
 	// Can only delete it if it exists already
 	if(that.currentMarkers[[marker.ns, marker.id]]) {
           //console.log('[mac] deleting marker with id ' + marker.id.toString() + ' and namespace ' + marker.ns);
-          that.rootObject.remove(that.currentMarkers[[marker.ns, marker.id]]);
+          //dispose object properly (http://stackoverflow.com/questions/14650716/deallocating-object3d)
+          var currentNode = that.currentMarkers[[marker.ns, marker.id]];
+          currentNode.traverse(function(child) {
+            if (child.geometry !== undefined) {
+              child.geometry.dispose();
+              //child.material.dispose(); //no need for this since material is shared among other objects
+            }
+          });
+          currentNode.unsubscribe();
+          that.rootObject.remove(currentNode);
           that.currentMarkers[[marker.ns, marker.id]] = null;
         }
         break;
@@ -1977,6 +1986,7 @@ ROS3D.MarkerArrayClient = function(options) {
   });
 };
 ROS3D.MarkerArrayClient.prototype.__proto__ = EventEmitter2.prototype;
+
 /**
  * @author Russell Toris - rctoris@wpi.edu
  */
@@ -2032,109 +2042,6 @@ ROS3D.MarkerClient = function(options) {
   });
 };
 ROS3D.MarkerClient.prototype.__proto__ = EventEmitter2.prototype;
-
-/**
- * @author Ellis Ratner - eratner@bowdoin.edu
- */
-
-/**
- * A marker client that listens to a given marker topic.
- *
- * Emits the following events:
- *  * 'change' - there was an update or change in the markers
- *
- * @constructor
- * @param options - object with following keys:
- *   * ros - the ROSLIB.Ros connection handle
- *   * topic - the marker topic to listen to
- *   * tfClient - the TF client handle to use
- *   * rootObject (optional) - the root object to add markers to
- */
-ROS3D.MultiMarkerClient = function(options) {
-  var that = this;
-  options = options || {};
-  var ros = options.ros;
-  var topic = options.topic;
-  this.tfClient = options.tfClient;
-  this.rootObject = options.rootObject || new THREE.Object3D();
-
-  // a dictionary of the currently displayed markers
-  this.currentMarkers = [];
-
-  // subscribe to the topic
-  var rosTopic = new ROSLIB.Topic({
-    ros : ros,
-    name : topic,
-    messageType : 'visualization_msgs/Marker',
-    compression : 'png'
-  });
-  rosTopic.subscribe(function(message) {
-    if(that.currentMarkers[[message.ns, message.id]] && message.action === 2) {
-      // a marker with this id and namespace already exists; delete it.
-      //console.log('deleting marker with namespace\'' + message.ns + '\' and id ' + message.id + '.');
-      that.rootObject.remove(that.currentMarkers[[message.ns, message.id]]);
-      that.currentMarkers[[message.ns, message.id]] = null;
-      that.emit('change');
-    } else {
-      if(that.currentMarkers[[message.ns, message.id]]) {
-	// if the marker already exists, update the pose
-	//console.log('marker ' + message.id + ' already exists; updating its pose.');
-        that.currentMarkers[[message.ns, message.id]].children[0].position = new THREE.Vector3(
-          message.pose.position.x,
-          message.pose.position.y,
-          message.pose.position.z
-        );
-        that.currentMarkers[[message.ns, message.id]].children[0].quaternion = new THREE.Quaternion(
-          message.pose.orientation.x,
-          message.pose.orientation.y,
-          message.pose.orientation.z,
-          message.pose.orientation.w
-        );
-	that.emit('change');
-      } else {
-	if(message.action === 2) {
-          console.log('does not exist, but action is delete');
-          return;
-	}
-	// otherwise, add it to the scene
-	//console.log('adding new marker ' + message.id + '.');
-	var newMarker = new ROS3D.Marker({
-          message : message
-	});
-	var node = new ROS3D.SceneNode({
-          frameID : message.header.frame_id,
-          tfClient : that.tfClient,
-          object : newMarker
-	});
-	that.currentMarkers[[message.ns, message.id]] = node;
-        that.rootObject.add(node);
-
-	// If the marker has a timeout, delete when necessary
-	if(parseInt(message.lifetime.secs, 10) !== 0) {
-          var lifetime = parseInt(message.lifetime.secs, 10);
-          console.log('Lifetime: ' + lifetime);
-          if(lifetime > 0) {
-            console.log('Removing marker after lifetime ' +
-                        lifetime);
-              var removeMarker = window.setInterval(function() {
-              console.log('Time\'s up! removing marker');
-              that.rootObject.remove(that.currentMarkers[[message.ns, message.id]]);
-              that.currentMarkers[[message.ns, message.id]] = null;
-              that.emit('change');
-              clearInterval(removeMarker);
-            }, lifetime);
-          } else {
-            console.log('Error: marker has invalid lifetime ' +
-                        lifetime);
-          }
-	}
-
-	that.emit('change');
-      }
-    }
-  });
-};
-ROS3D.MultiMarkerClient.prototype.__proto__ = EventEmitter2.prototype;
 
 /**
  * @author Ellis Ratner - ellis.ratner@gmail.com
@@ -2680,8 +2587,8 @@ ROS3D.UrdfClient = function(options) {
 ROS3D.SceneNode = function(options) {
   options = options || {};
   var that = this;
-  var tfClient = options.tfClient;
-  var frameID = options.frameID;
+  var tfClient = this.tfClient = options.tfClient;
+  var frameID = this.frameID = options.frameID;
   var object = options.object;
   this.pose = options.pose || new ROSLIB.Pose();
 
@@ -2695,7 +2602,7 @@ ROS3D.SceneNode = function(options) {
   this.updatePose(this.pose);
 
   // listen for TF updates
-  tfClient.subscribe(frameID, function(msg) {
+  tfClient.subscribe(frameID, this.callback = function(msg) {
 
     // apply the transform
     var tf = new ROSLIB.Transform(msg);
@@ -2706,6 +2613,15 @@ ROS3D.SceneNode = function(options) {
     that.updatePose(poseTransformed);
   });
 };
+
+ROS3D.SceneNode.prototype.unsubscribe = function() {
+  var frameID = this.frameID;
+  if (frameID[0] === '/') {
+    frameID = frameID.substring(1);
+  }
+  this.tfClient.unsubscribe(frameID, this.callback);
+};
+
 ROS3D.SceneNode.prototype.__proto__ = THREE.Object3D.prototype;
 
 /**
