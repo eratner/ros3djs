@@ -95,15 +95,13 @@ ROS3D.Viewer = function(options) {
     // render any mouseovers
     that.highlighter.renderHighlight(that.renderer, that.scene, that.camera);
 
-    // draw the frame
-    requestAnimationFrame(draw);
   }
 
   // add the renderer to the page
   document.getElementById(divID).appendChild(this.renderer.domElement);
 
   // begin the animation
-  draw();
+  ROS3D.limitLoop(draw, options.fps);
 };
 
 /**
