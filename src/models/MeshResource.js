@@ -34,7 +34,10 @@ ROS3D.MeshResource = function(options) {
 
   // check the type
   if (uri.substr(-4).toLowerCase() === '.dae') {
-    var loader = new ColladaLoader2();
+    if(!ROS3D.ColladaLoader) {
+      ROS3D.ColladaLoader = new ColladaLoader2();
+    }
+    var loader = ROS3D.ColladaLoader;
     loader.log = function(message) {
       if (that.warnings) {
         console.warn(message);
@@ -64,4 +67,5 @@ ROS3D.MeshResource = function(options) {
     });
   }
 };
+
 ROS3D.MeshResource.prototype.__proto__ = THREE.Object3D.prototype;
