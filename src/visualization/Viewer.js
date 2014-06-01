@@ -101,6 +101,7 @@ ROS3D.Viewer = function(options) {
   document.getElementById(divID).appendChild(this.renderer.domElement);
 
   // begin the animation
+  console.log('ros3djs limiting the FPS to ' + options.fps.toString());
   ROS3D.limitLoop(draw, options.fps);
 };
 

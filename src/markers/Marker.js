@@ -258,9 +258,15 @@ ROS3D.Marker = function(options) {
         }
         meshPath = message.mesh_resource.substr(0, index + 1);
         resourceLocation = message.mesh_resource.substr(index + 1);
+      } else if(message.mesh_resource.substr(0, 10) === 'package://') {
+	// if the resource is specified relative to a ROS package
+	// @todo any way around that these packages must be in the web
+	// root directory?
+	resourceLocation = message.mesh_resource.substr(10);
       } else {
-        resourceLocation = message.mesh_resource.substr(10);
+        resourceLocation = message.mesh_resource;
       }
+      console.log('meshPath = ' + meshPath + '; resourceLocation = ' + resourceLocation);
       var meshResource = new ROS3D.MeshResource({
         path : meshPath,
         resource : resourceLocation,
