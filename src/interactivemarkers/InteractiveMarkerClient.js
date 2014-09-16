@@ -7,12 +7,15 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * ros - a handle to the ROS connection
  *  * tfClient - a handle to the TF client
  *  * topic (optional) - the topic to subscribe to, like '/basic_controls'
  *  * path (optional) - the base path to any meshes that will be loaded
  *  * camera - the main camera associated with the viewer for this marker client
  *  * rootObject (optional) - the root THREE 3D object to render to
+ *  * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                        ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.InteractiveMarkerClient = function(options) {
   var that = this;
@@ -23,6 +26,7 @@ ROS3D.InteractiveMarkerClient = function(options) {
   this.path = options.path || '/';
   this.camera = options.camera;
   this.rootObject = options.rootObject || new THREE.Object3D();
+  this.loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
   this.interactiveMarkers = {};
   this.updateTopic = null;
@@ -145,7 +149,8 @@ ROS3D.InteractiveMarkerClient.prototype.processUpdate = function(message) {
     var intMarker = new ROS3D.InteractiveMarker({
       handle : handle,
       camera : that.camera,
-      path : that.path
+      path : that.path,
+      loader : that.loader
     });
     // add it to the scene
     intMarker.name = msg.name;
@@ -177,7 +182,7 @@ ROS3D.InteractiveMarkerClient.prototype.processUpdate = function(message) {
 ROS3D.InteractiveMarkerClient.prototype.eraseIntMarker = function(intMarkerName) {
   if (this.interactiveMarkers[intMarkerName]) {
     // remove the object
-    this.rootObject.remove(this.rootObject.getChildByName(intMarkerName));
+    this.rootObject.remove(this.rootObject.getObjectByName(intMarkerName));
     delete this.interactiveMarkers[intMarkerName];
   }
 };

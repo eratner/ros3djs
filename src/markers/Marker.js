@@ -8,13 +8,17 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * path - the base path or URL for any mesh files that will be loaded for this marker
  *   * message - the marker message
+ *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.Marker = function(options) {
   options = options || {};
   var path = options.path || '/';
   var message = options.message;
+  var loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
   // check for a trailing '/'
   if (path.substr(path.length - 1) !== '/') {
@@ -22,7 +26,6 @@ ROS3D.Marker = function(options) {
   }
 
   THREE.Object3D.call(this);
-  this.useQuaternion = true;
 
   // set the pose and get the color
   this.setPose(message.pose);
@@ -83,7 +86,6 @@ ROS3D.Marker = function(options) {
       // set the cylinder dimensions
       var cylinderGeom = new THREE.CylinderGeometry(0.5, 0.5, 1, 16, 1, false);
       var cylinderMesh = new THREE.Mesh(cylinderGeom, colorMaterial);
-      cylinderMesh.useQuaternion = true;
       cylinderMesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * 0.5);
       cylinderMesh.scale = new THREE.Vector3(message.scale.x, message.scale.z, message.scale.y);
       this.add(cylinderMesh);
@@ -215,28 +217,31 @@ ROS3D.Marker = function(options) {
       this.add(new THREE.ParticleSystem(geometry, material));
       break;
     case ROS3D.MARKER_TEXT_VIEW_FACING:
-      // setup the text
-      var textGeo = new THREE.TextGeometry(message.text, {
-        size : message.scale.x * 0.5,
-        height : 0.1 * message.scale.x,
-        curveSegments : 4,
-        font : 'helvetiker',
-        bevelEnabled : false,
-        bevelThickness : 2,
-        bevelSize : 2,
-        material : 0,
-        extrudeMaterial : 0
-      });
-      textGeo.computeVertexNormals();
-      textGeo.computeBoundingBox();
+      // only work on non-empty text
+      if (message.text.length > 0) {
+        // setup the text
+        var textGeo = new THREE.TextGeometry(message.text, {
+          size: message.scale.x * 0.5,
+          height: 0.1 * message.scale.x,
+          curveSegments: 4,
+          font: 'helvetiker',
+          bevelEnabled: false,
+          bevelThickness: 2,
+          bevelSize: 2,
+          material: 0,
+          extrudeMaterial: 0
+        });
+        textGeo.computeVertexNormals();
+        textGeo.computeBoundingBox();
 
-      // position the text and add it
-      var mesh = new THREE.Mesh(textGeo, colorMaterial);
-      var centerOffset = -0.5 * (textGeo.boundingBox.max.x - textGeo.boundingBox.min.x);
-      mesh.position.y = -centerOffset;
-      mesh.rotation.x = Math.PI * 0.5;
-      mesh.rotation.y = Math.PI * 1.5;
-      this.add(mesh);
+        // position the text and add it
+        var mesh = new THREE.Mesh(textGeo, colorMaterial);
+        var centerOffset = -0.5 * (textGeo.boundingBox.max.x - textGeo.boundingBox.min.x);
+        mesh.position.y = -centerOffset;
+        mesh.rotation.x = Math.PI * 0.5;
+        mesh.rotation.y = Math.PI * 1.5;
+        this.add(mesh);
+      }
       break;
     case ROS3D.MARKER_MESH_RESOURCE:
       // load and add the mesh
@@ -270,7 +275,8 @@ ROS3D.Marker = function(options) {
       var meshResource = new ROS3D.MeshResource({
         path : meshPath,
         resource : resourceLocation,
-        material : meshColorMaterial
+        material : meshColorMaterial,
+        loader : loader
       });
       meshResource.scale = new THREE.Vector3(message.scale.x, message.scale.y, message.scale.z);
       this.add(meshResource);

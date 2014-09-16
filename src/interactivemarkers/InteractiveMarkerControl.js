@@ -7,22 +7,26 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * parent - the parent of this control
  *  * message - the interactive marker control message
  *  * camera - the main camera associated with the viewer for this marker client
  *  * path (optional) - the base path to any meshes that will be loaded
+ *  * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                        ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.InteractiveMarkerControl = function(options) {
   var that = this;
   THREE.Object3D.call(this);
-  THREE.EventDispatcher.call(this);
 
   options = options || {};
   this.parent = options.parent;
+  var handle = options.handle;
   var message = options.message;
   this.name = message.name;
   this.camera = options.camera;
   this.path = options.path || '/';
+  this.loader = options.loader || ROS3D.COLLADA_LOADER_2;
   this.dragging = false;
 
   // orientation for the control
@@ -117,7 +121,6 @@ ROS3D.InteractiveMarkerControl = function(options) {
       break;
     case ROS3D.INTERACTIVE_MARKER_FIXED:
       this.updateMatrixWorld = function(force) {
-        that.useQuaternion = true;
         that.quaternion = that.parent.quaternion.clone().inverse();
         that.updateMatrix();
         that.matrixWorldNeedsUpdate = true;
@@ -126,15 +129,15 @@ ROS3D.InteractiveMarkerControl = function(options) {
       };
       break;
     case ROS3D.INTERACTIVE_MARKER_VIEW_FACING:
-      var independentMarkerOrientation = message.independentMarkerOrientation;
+      var independentMarkerOrientation = message.independent_marker_orientation;
       this.updateMatrixWorld = function(force) {
         that.camera.updateMatrixWorld();
         var cameraRot = new THREE.Matrix4().extractRotation(that.camera.matrixWorld);
 
         var ros2Gl = new THREE.Matrix4();
         var r90 = Math.PI * 0.5;
-        var rv = new THREE.Vector3(-r90, 0, r90);
-        ros2Gl.setRotationFromEuler(rv);
+        var rv = new THREE.Euler(-r90, 0, r90);
+        ros2Gl.makeRotationFromEuler(rv);
 
         var worldToLocal = new THREE.Matrix4();
         worldToLocal.getInverse(that.parent.matrixWorld);
@@ -146,7 +149,6 @@ ROS3D.InteractiveMarkerControl = function(options) {
 
         // check the orientation
         if (!independentMarkerOrientation) {
-          that.useQuaternion = true;
           that.quaternion.copy(that.currentControlOri);
           that.updateMatrix();
           that.matrixWorldNeedsUpdate = true;
@@ -159,23 +161,52 @@ ROS3D.InteractiveMarkerControl = function(options) {
       break;
   }
 
+  // temporary TFClient to get transformations from InteractiveMarker
+  // frame to potential child Marker frames
+  var localTfClient = new ROSLIB.TFClient({
+    ros : handle.tfClient.ros,
+    fixedFrame : handle.message.header.frame_id,
+  });
+
   // create visuals (markers)
   message.markers.forEach(function(markerMsg) {
-    var markerHelper = new ROS3D.Marker({
-      message : markerMsg,
-      path : that.path
-    });
+    var addMarker = function(transformMsg) {
+      var markerHelper = new ROS3D.Marker({
+        message : markerMsg,
+        path : that.path,
+        loader : that.loader
+      });
+      
+      // if transformMsg isn't null, this was called by TFClient
+      if (transformMsg !== null) {
+        // get the current pose as a ROSLIB.Pose...
+        var newPose = new ROSLIB.Pose({
+          position : markerHelper.position,
+          quaternion : markerHelper.quaternion
+        });
+        // so we can apply the transform provided by the TFClient
+        newPose.applyTransform(new ROSLIB.Transform(transformMsg));
+        markerHelper.setPose(newPose);
 
+        markerHelper.updateMatrixWorld();
+        // we only need to set the pose once - at least, this is what RViz seems to be doing, might change in the future
+        localTfClient.unsubscribe(markerMsg.header.frame_id);
+      }
+
+      // add the marker
+      that.add(markerHelper);
+    };
+    
+    // If the marker lives in a separate TF Frame, ask the *local* TFClient
+    // for the transformation from the InteractiveMarker frame to the
+    // sub-Marker frame
     if (markerMsg.header.frame_id !== '') {
-      // if the marker lives in its own coordinate frame, convert position into IM's local frame
-      markerHelper.position.add(posInv);
-      markerHelper.position.applyQuaternion(rotInv);
-      markerHelper.quaternion.multiplyQuaternions(rotInv, markerHelper.quaternion);
-      markerHelper.updateMatrixWorld();
+      localTfClient.subscribe(markerMsg.header.frame_id, addMarker);
     }
-
-    // add the marker
-    that.add(markerHelper);
+    // If not, just add the marker without changing its pose
+    else {
+      addMarker(null);
+    }
   });
 };
 ROS3D.InteractiveMarkerControl.prototype.__proto__ = THREE.Object3D.prototype;

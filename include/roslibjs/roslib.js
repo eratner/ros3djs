@@ -3,7 +3,7 @@
  */
 
 var ROSLIB = ROSLIB || {
-  REVISION : '5'
+  REVISION : '0.9.0'
 };
 
 //URDF types
@@ -213,6 +213,208 @@ ROSLIB.Goal.prototype.cancel = function() {
 };
 
 /**
+ * @author Laura Lindzey - lindzey@gmail.com
+ */
+
+/**
+ * An actionlib action server client.
+ *
+ * Emits the following events:
+ *  * 'goal' - goal sent by action client
+ *  * 'cancel' - action client has canceled the request
+ *
+ *  @constructor
+ *  @param options - object with following keys:
+ *   * ros - the ROSLIB.Ros connection handle
+ *   * serverName - the action server name, like /fibonacci
+ *   * actionName - the action message name, like 'actionlib_tutorials/FibonacciAction'
+ */
+
+ROSLIB.SimpleActionServer = function(options) {
+    var that = this;
+    options = options || {};
+    this.ros = options.ros;
+    this.serverName = options.serverName;
+    this.actionName = options.actionName;
+
+    // create and advertise publishers
+    this.feedbackPublisher = new ROSLIB.Topic({
+        ros : this.ros,
+        name : this.serverName + '/feedback',
+        messageType : this.actionName + 'Feedback'
+    });
+    this.feedbackPublisher.advertise();
+
+    var statusPublisher = new ROSLIB.Topic({
+        ros : this.ros,
+        name : this.serverName + '/status',
+        messageType : 'actionlib_msgs/GoalStatusArray'
+    });
+    statusPublisher.advertise();
+
+    this.resultPublisher = new ROSLIB.Topic({
+        ros : this.ros,
+        name : this.serverName + '/result',
+        messageType : this.actionName + 'Result'
+    });
+    this.resultPublisher.advertise();
+
+    // create and subscribe to listeners
+    var goalListener = new ROSLIB.Topic({
+        ros : this.ros,
+        name : this.serverName + '/goal',
+        messageType : this.actionName + 'Goal'
+    });
+
+    var cancelListener = new ROSLIB.Topic({
+        ros : this.ros,
+        name : this.serverName + '/cancel',
+        messageType : 'actionlib_msgs/GoalID'
+    });
+
+    // Track the goals and their status in order to publish status...
+    this.statusMessage = new ROSLIB.Message({
+        header : {
+            stamp : {secs : 0, nsecs : 100},
+            frame_id : ''
+        },
+        status_list : []
+    });
+
+    // needed for handling preemption prompted by a new goal being received
+    this.currentGoal = null; // currently tracked goal
+    this.nextGoal = null; // the one that'll be preempting
+
+    goalListener.subscribe(function(goalMessage) {
+        
+    if(that.currentGoal) {
+            that.nextGoal = goalMessage;
+            // needs to happen AFTER rest is set up
+            that.emit('cancel');
+    } else {
+            that.statusMessage.status_list = [{goal_id : goalMessage.goal_id, status : 1}];
+            that.currentGoal = goalMessage;
+            that.emit('goal', goalMessage.goal);
+    }
+    });
+
+    // helper function for determing ordering of timestamps
+    // returns t1 < t2
+    var isEarlier = function(t1, t2) {
+        if(t1.secs > t2.secs) {
+            return false;
+        } else if(t1.secs < t2.secs) {
+            return true;
+        } else if(t1.nsecs < t2.nsecs) {
+            return true;
+        } else {
+            return false;
+        }
+    };
+
+    // TODO: this may be more complicated than necessary, since I'm
+    // not sure if the callbacks can ever wind up with a scenario
+    // where we've been preempted by a next goal, it hasn't finished
+    // processing, and then we get a cancel message
+    cancelListener.subscribe(function(cancelMessage) {
+
+        // cancel ALL goals if both empty
+        if(cancelMessage.stamp.secs === 0 && cancelMessage.stamp.secs === 0 && cancelMessage.id === '') {
+            that.nextGoal = null;
+            if(that.currentGoal) {
+                that.emit('cancel');
+            }
+        } else { // treat id and stamp independently
+            if(that.currentGoal && cancelMessage.id === that.currentGoal.goal_id.id) {
+                that.emit('cancel');
+            } else if(that.nextGoal && cancelMessage.id === that.nextGoal.goal_id.id) {
+                that.nextGoal = null;
+            }
+
+            if(that.nextGoal && isEarlier(that.nextGoal.goal_id.stamp,
+                                          cancelMessage.stamp)) {
+                that.nextGoal = null;
+            }
+            if(that.currentGoal && isEarlier(that.currentGoal.goal_id.stamp,
+                                             cancelMessage.stamp)) {
+                
+                that.emit('cancel');
+            }
+        }
+    });
+
+    // publish status at pseudo-fixed rate; required for clients to know they've connected
+    var statusInterval = setInterval( function() {
+        var currentTime = new Date();
+        var secs = Math.floor(currentTime.getTime()/1000);
+        var nsecs = Math.round(1000000000*(currentTime.getTime()/1000-secs));
+        that.statusMessage.header.stamp.secs = secs;
+        that.statusMessage.header.stamp.nsecs = nsecs;
+        statusPublisher.publish(that.statusMessage);
+    }, 500); // publish every 500ms
+
+};
+
+ROSLIB.SimpleActionServer.prototype.__proto__ = EventEmitter2.prototype;
+
+/**
+*  Set action state to succeeded and return to client
+*/
+
+ROSLIB.SimpleActionServer.prototype.setSucceeded = function(result2) {
+    
+
+    var resultMessage = new ROSLIB.Message({
+        status : {goal_id : this.currentGoal.goal_id, status : 3},
+        result : result2
+    });
+    this.resultPublisher.publish(resultMessage);
+
+    this.statusMessage.status_list = [];
+    if(this.nextGoal) {
+        this.currentGoal = this.nextGoal;
+        this.nextGoal = null;
+        this.emit('goal', this.currentGoal.goal);
+    } else {
+        this.currentGoal = null;
+    }
+};
+
+/**
+*  Function to send feedback
+*/
+
+ROSLIB.SimpleActionServer.prototype.sendFeedback = function(feedback2) {
+
+    var feedbackMessage = new ROSLIB.Message({
+        status : {goal_id : this.currentGoal.goal_id, status : 1},
+        feedback : feedback2
+    });
+    this.feedbackPublisher.publish(feedbackMessage);
+};
+
+/**
+*  Handle case where client requests preemption
+*/
+
+ROSLIB.SimpleActionServer.prototype.setPreempted = function() {
+
+    this.statusMessage.status_list = [];
+    var resultMessage = new ROSLIB.Message({
+        status : {goal_id : this.currentGoal.goal_id, status : 2},
+    });
+    this.resultPublisher.publish(resultMessage);
+
+    if(this.nextGoal) {
+        this.currentGoal = this.nextGoal;
+        this.nextGoal = null;
+        this.emit('goal', this.currentGoal.goal);
+    } else {
+        this.currentGoal = null;
+    }
+};
+
+/**
  * @author Brandon Alexander - baalexander@gmail.com
  */
 
@@ -263,8 +465,7 @@ ROSLIB.Param.prototype.get = function(callback) {
   });
 
   var request = new ROSLIB.ServiceRequest({
-    name : this.name,
-    value : JSON.stringify('')
+    name : this.name
   });
 
   paramClient.callService(request, function(result) {
@@ -295,6 +496,24 @@ ROSLIB.Param.prototype.set = function(value) {
 };
 
 /**
+ * Delete this parameter on the ROS server.
+ */
+ROSLIB.Param.prototype.delete = function() {
+  var paramClient = new ROSLIB.Service({
+    ros : this.ros,
+    name : '/rosapi/delete_param',
+    serviceType : 'rosapi/DeleteParam'
+  });
+
+  var request = new ROSLIB.ServiceRequest({
+    name : this.name
+  });
+
+  paramClient.callService(request, function() {
+  });
+};
+
+/**
  * @author Brandon Alexander - baalexander@gmail.com
  */
 
@@ -316,6 +535,10 @@ ROSLIB.Ros = function(options) {
   options = options || {};
   var url = options.url;
   this.socket = null;
+  this.idCounter = 0;
+
+  // Sets unlimited event listeners.
+  this.setMaxListeners(0);
 
   // begin by checking if a URL was given
   if (url) {
@@ -410,7 +633,7 @@ ROSLIB.Ros.prototype.connect = function(url) {
       if (message.op === 'publish') {
         that.emit(message.topic, message.msg);
       } else if (message.op === 'service_response') {
-        that.emit(message.id, message.values);
+        that.emit(message.id, message);
       }
     }
 
@@ -525,6 +748,26 @@ ROSLIB.Ros.prototype.getServices = function(callback) {
 };
 
 /**
+ * Retrieves list of active node names in ROS.
+ *
+ * @param callback - function with the following params:
+ *   * nodes - array of node names
+ */
+ROSLIB.Ros.prototype.getNodes = function(callback) {
+  var nodesClient = new ROSLIB.Service({
+    ros : this,
+    name : '/rosapi/nodes',
+    serviceType : 'rosapi/Nodes'
+  });
+
+  var request = new ROSLIB.ServiceRequest();
+
+  nodesClient.callService(request, function(result) {
+    callback(result.nodes);
+  });
+};
+
+/**
  * Retrieves list of param names from the ROS Parameter Server.
  *
  * @param callback function with params:
@@ -541,6 +784,99 @@ ROSLIB.Ros.prototype.getParams = function(callback) {
   paramsClient.callService(request, function(result) {
     callback(result.names);
   });
+};
+
+/**
+ * Retrieves a type of ROS topic.
+ *
+ * @param callback - function with params:
+ *   * type - String of the topic type
+ */
+ROSLIB.Ros.prototype.getTopicType = function(topic, callback) {
+  var topicTypeClient = new ROSLIB.Service({
+    ros : this,
+    name : '/rosapi/topic_type',
+    serviceType : 'rosapi/TopicType'
+  });
+  var request = new ROSLIB.ServiceRequest({
+    topic: topic
+  });
+  topicTypeClient.callService(request, function(result) {
+    callback(result.type);
+  });
+};
+
+/**
+ * Retrieves a detail of ROS message.
+ *
+ * @param callback - function with params:
+ *   * details - Array of the message detail
+ * @param message - String of a topic type
+ */
+ROSLIB.Ros.prototype.getMessageDetails = function(message, callback) {
+  var messageDetailClient = new ROSLIB.Service({
+    ros : this,
+    name : '/rosapi/message_details',
+    serviceType : 'rosapi/MessageDetails'
+  });
+  var request = new ROSLIB.ServiceRequest({
+    type: message
+  });
+  messageDetailClient.callService(request, function(result) {
+    callback(result.typedefs);
+  });
+};
+
+/**
+ * Decode a typedefs into a dictionary like `rosmsg show foo/bar`
+ *
+ * @param defs - array of type_def dictionary
+ */
+ROSLIB.Ros.prototype.decodeTypeDefs = function(defs) {
+  var that = this;
+
+  // calls itself recursively to resolve type definition using hints.
+  var decodeTypeDefsRec = function(theType, hints) {
+    var typeDefDict = {};
+    for (var i = 0; i < theType.fieldnames.length; i++) {
+      var arrayLen = theType.fieldarraylen[i];
+      var fieldName = theType.fieldnames[i];
+      var fieldType = theType.fieldtypes[i];
+      if (fieldType.indexOf('/') === -1) { // check the fieldType includes '/' or not
+        if (arrayLen === -1) {
+          typeDefDict[fieldName] = fieldType;
+        }
+        else {
+          typeDefDict[fieldName] = [fieldType];
+        }
+      }
+      else {
+        // lookup the name
+        var sub = false;
+        for (var j = 0; j < hints.length; j++) {
+          if (hints[j].type.toString() === fieldType.toString()) {
+            sub = hints[j];
+            break;
+          }
+        }
+        if (sub) {
+          var subResult = decodeTypeDefsRec(sub, hints);
+          if (arrayLen === -1) {
+            typeDefDict[fieldName] = subResult;
+          }
+          else {
+            typeDefDict[fieldName] = [subResult];
+          }
+        }
+        else {
+          that.emit('error', 'Cannot find ' + fieldType + ' in decodeTypeDefs');
+        }
+      }
+    }
+    return typeDefDict;
+  };
+  
+  return decodeTypeDefsRec(defs[0], defs);
 };
 
 /**
@@ -569,26 +905,29 @@ ROSLIB.Service = function(options) {
  * @param request - the ROSLIB.ServiceRequest to send
  * @param callback - function with params:
  *   * response - the response from the service request
+ * @param failedCallback - the callback function when the service call failed (optional). Params:
+ *   * error - the error message reported by ROS
  */
-ROSLIB.Service.prototype.callService = function(request, callback) {
+ROSLIB.Service.prototype.callService = function(request, callback, failedCallback) {
   this.ros.idCounter++;
   var serviceCallId = 'call_service:' + this.name + ':' + this.ros.idCounter;
 
-  this.ros.once(serviceCallId, function(data) {
-    var response = new ROSLIB.ServiceResponse(data);
-    callback(response);
-  });
-
-  var requestValues = [];
-  Object.keys(request).forEach(function(name) {
-    requestValues.push(request[name]);
+  this.ros.once(serviceCallId, function(message) {
+    if (message.result !== undefined && message.result === false) {
+      if (typeof failedCallback === 'function') {
+        failedCallback(message.values);
+      }
+    } else {
+      var response = new ROSLIB.ServiceResponse(message.values);
+      callback(response);
+    }
   });
 
   var call = {
     op : 'call_service',
     id : serviceCallId,
     service : this.name,
-    args : requestValues
+    args : request
   };
   this.ros.callOnConnection(call);
 };
@@ -658,6 +997,8 @@ ROSLIB.Topic = function(options) {
   this.isAdvertised = false;
   this.compression = options.compression || 'none';
   this.throttle_rate = options.throttle_rate || 0;
+  this.latch = options.latch || false;
+  this.queue_size = options.queue_size || 100;
 
   // Check for valid compression types
   if (this.compression && this.compression !== 'png' && this.compression !== 'none') {
@@ -726,13 +1067,18 @@ ROSLIB.Topic.prototype.unsubscribe = function() {
  * Registers as a publisher for the topic.
  */
 ROSLIB.Topic.prototype.advertise = function() {
+  if (this.isAdvertised) {
+    return;
+  }
   this.ros.idCounter++;
-  var advertiseId = 'advertise:' + this.name + ':' + this.ros.idCounter;
+  this.advertiseId = 'advertise:' + this.name + ':' + this.ros.idCounter;
   var call = {
     op : 'advertise',
-    id : advertiseId,
+    id : this.advertiseId,
     type : this.messageType,
-    topic : this.name
+    topic : this.name,
+    latch : this.latch,
+    queue_size : this.queue_size
   };
   this.ros.callOnConnection(call);
   this.isAdvertised = true;
@@ -742,8 +1088,10 @@ ROSLIB.Topic.prototype.advertise = function() {
  * Unregisters as a publisher for the topic.
  */
 ROSLIB.Topic.prototype.unadvertise = function() {
-  this.ros.idCounter++;
-  var unadvertiseId = 'unadvertise:' + this.name + ':' + this.ros.idCounter;
+  if (!this.isAdvertised) {
+    return;
+  }
+  var unadvertiseId = this.advertiseId;
   var call = {
     op : 'unadvertise',
     id : unadvertiseId,
@@ -760,7 +1108,7 @@ ROSLIB.Topic.prototype.unadvertise = function() {
  */
 ROSLIB.Topic.prototype.publish = function(message) {
   if (!this.isAdvertised) {
-    this.advertise();
+      this.advertise();
   }
 
   this.ros.idCounter++;
@@ -769,7 +1117,8 @@ ROSLIB.Topic.prototype.publish = function(message) {
     op : 'publish',
     id : publishId,
     topic : this.name,
-    msg : message
+    msg : message,
+    latch : this.latch
   };
   this.ros.callOnConnection(call);
 };
@@ -897,7 +1246,6 @@ ROSLIB.Quaternion.prototype.multiply = function(q) {
 ROSLIB.Quaternion.prototype.clone = function() {
   return new ROSLIB.Quaternion(this);
 };
-
 
 /**
  * @author David Gossow - dgossow@willowgarage.com
@@ -1040,6 +1388,9 @@ ROSLIB.TFClient.prototype.processFeedback = function(tf) {
   var that = this;
   tf.transforms.forEach(function(transform) {
     var frameID = transform.child_frame_id;
+    if (frameID[0] === '/') {
+      frameID = frameID.substring(1);
+    }
     var info = that.frameInfos[frameID];
     if (info !== undefined) {
       info.transform = new ROSLIB.Transform({
@@ -1092,7 +1443,7 @@ ROSLIB.TFClient.prototype.updateGoal = function() {
  *   * transform - the transform data
  */
 ROSLIB.TFClient.prototype.subscribe = function(frameID, callback) {
-  // make sure the frame id is relative
+  // remove leading slash, if it's there
   if (frameID[0] === '/') {
     frameID = frameID.substring(1);
   }
@@ -1121,6 +1472,10 @@ ROSLIB.TFClient.prototype.subscribe = function(frameID, callback) {
  * @param callback - the callback function to remove
  */
 ROSLIB.TFClient.prototype.unsubscribe = function(frameID, callback) {
+  // remove leading slash, if it's there
+  if (frameID[0] === '/') {
+    frameID = frameID.substring(1);
+  }
   var info = this.frameInfos[frameID];
   if (info !== undefined) {
     var cbIndex = info.cbs.indexOf(callback);
@@ -1160,7 +1515,7 @@ ROSLIB.UrdfBox = function(options) {
    * @param xml - the XML element to parse
    */
   var initXml = function(xml) {
-    this.type = ROSLIB.URDF_BOX;
+    that.type = ROSLIB.URDF_BOX;
 
     // Parse the string
     var xyz = xml.getAttribute('size').split(' ');
@@ -1411,9 +1766,9 @@ ROSLIB.UrdfModel = function(options) {
    *
    * @param xml - the XML element to parse
    */
-  var initXml = function(xml) {
+  var initXml = function(xmlDoc) {
     // Get the robot tag
-    var robotXml = xml.evaluate('//robot', xml, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    var robotXml = xmlDoc.evaluate('//robot', xmlDoc, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
     // Get the robot name
     that.name = robotXml.getAttribute('name');
@@ -1464,7 +1819,6 @@ ROSLIB.UrdfModel = function(options) {
   // Pass it to the XML parser
   initXml(xml);
 };
-
 
 /**
  * @author Benjamin Pitzer - ben.pitzer@gmail.com

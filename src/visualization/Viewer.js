@@ -9,6 +9,7 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * divID - the ID of the div to place the viewer in
  *  * width - the initial width, in pixels, of the canvas
  *  * height - the initial height, in pixels, of the canvas
@@ -36,7 +37,7 @@ ROS3D.Viewer = function(options) {
   this.renderer = new THREE.WebGLRenderer({
     antialias : this.antialias
   });
-  this.renderer.setClearColorHex(background.replace('#', '0x'), 1.0);
+  this.renderer.setClearColor(background.replace('#', '0x'), 1.0);
   this.renderer.sortObjects = false;
   this.renderer.setSize(width, height);
   this.renderer.shadowMapEnabled = false;

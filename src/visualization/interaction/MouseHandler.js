@@ -7,6 +7,7 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * renderer - the main renderer
  *   * camera - the main camera in the scene
  *   * rootObject - the root object to check for mouse events
@@ -193,3 +194,5 @@ ROS3D.MouseHandler.prototype.notify = function(target, type, event3D) {
   }
   return false;
 };
+
+THREE.EventDispatcher.prototype.apply( ROS3D.MouseHandler.prototype );

@@ -7,6 +7,7 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * menuEntries - the menu entries to add
  *  * className (optional) - a custom CSS class for the menu div
  *  * entryClassName (optional) - a custom CSS class for the menu entry
@@ -164,3 +165,5 @@ ROS3D.InteractiveMarkerMenu.prototype.hide = function(event) {
   document.body.removeChild(this.overlayDomElem);
   document.body.removeChild(this.menuDomElem);
 };
+
+THREE.EventDispatcher.prototype.apply( ROS3D.InteractiveMarkerMenu.prototype );

@@ -8,16 +8,20 @@
  * parameter server.
  *
  * Emits the following events:
+ *
  * * 'change' - emited after the URDF and its meshes have been loaded into the root object
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * ros - the ROSLIB.Ros connection handle
  *   * param (optional) - the paramter to load the URDF from, like 'robot_description'
  *   * tfClient - the TF client handle to use
  *   * path (optional) - the base path to the associated Collada models that will be loaded
  *   * rootObject (optional) - the root object to add this marker to
  *   * tfPrefix (optional) - the TF prefix to used for multi-robots
+ *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.UrdfClient = function(options) {
   var that = this;
@@ -28,6 +32,7 @@ ROS3D.UrdfClient = function(options) {
   this.tfClient = options.tfClient;
   this.rootObject = options.rootObject || new THREE.Object3D();
   var tfPrefix = options.tfPrefix || '';
+  var loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
   // get the URDF value from ROS
   var getParam = new ROSLIB.Param({
@@ -45,7 +50,8 @@ ROS3D.UrdfClient = function(options) {
       urdfModel : urdfModel,
       path : that.path,
       tfClient : that.tfClient,
-      tfPrefix : tfPrefix
+      tfPrefix : tfPrefix,
+      loader : loader
     }));
   });
 };

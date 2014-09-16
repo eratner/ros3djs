@@ -4,7 +4,7 @@
  */
 
 var ROS3D = ROS3D || {
-  REVISION : '8-devel'
+  REVISION : '0.10.0'
 };
 
 // Marker types
@@ -42,6 +42,11 @@ ROS3D.INTERACTIVE_MARKER_MOVE_ROTATE = 6;
 ROS3D.INTERACTIVE_MARKER_INHERIT = 0;
 ROS3D.INTERACTIVE_MARKER_FIXED = 1;
 ROS3D.INTERACTIVE_MARKER_VIEW_FACING = 2;
+
+// Collada loader types
+ROS3D.COLLADA_LOADER = 1;
+ROS3D.COLLADA_LOADER_2 = 2;
+
 
 /**
  * Create a THREE material based on the given RGBA values.
@@ -177,6 +182,7 @@ ROS3D.closestAxisPoint = function(axisRay, camera, mousePos) {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * url - the URL of the stream
  *   * f (optional) - the camera's focal length (defaults to standard Kinect calibration)
  *   * pointSize (optional) - point size (pixels) for rendered point cloud
@@ -483,9 +489,12 @@ ROS3D.DepthCloud.prototype.stopStream = function() {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * handle - the ROS3D.InteractiveMarkerHandle for this marker
  *  * camera - the main camera associated with the viewer for this marker
  *  * path (optional) - the base path to any meshes that will be loaded
+ *  * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                        ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.InteractiveMarker = function(options) {
   THREE.Object3D.call(this);
@@ -497,6 +506,7 @@ ROS3D.InteractiveMarker = function(options) {
   this.name = handle.name;
   var camera = options.camera;
   var path = options.path || '/';
+  var loader = options.loader || ROS3D.COLLADA_LOADER_2;
   this.dragging = false;
 
   // set the initial pose
@@ -517,9 +527,11 @@ ROS3D.InteractiveMarker = function(options) {
   handle.controls.forEach(function(controlMessage) {
     that.add(new ROS3D.InteractiveMarkerControl({
       parent : that,
+      handle : handle,
       message : controlMessage,
       camera : camera,
-      path : path
+      path : path,
+      loader : loader
     }));
   });
 
@@ -767,7 +779,6 @@ ROS3D.InteractiveMarker.prototype.onServerSetPose = function(event) {
       this.position.y = pose.position.y;
       this.position.z = pose.position.z;
 
-      this.useQuaternion = true;
       this.quaternion = new THREE.Quaternion(pose.orientation.x, pose.orientation.y,
           pose.orientation.z, pose.orientation.w);
 
@@ -775,6 +786,8 @@ ROS3D.InteractiveMarker.prototype.onServerSetPose = function(event) {
     }
   }
 };
+
+THREE.EventDispatcher.prototype.apply( ROS3D.InteractiveMarker.prototype );
 
 /**
  * @author David Gossow - dgossow@willowgarage.com
@@ -785,12 +798,15 @@ ROS3D.InteractiveMarker.prototype.onServerSetPose = function(event) {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * ros - a handle to the ROS connection
  *  * tfClient - a handle to the TF client
  *  * topic (optional) - the topic to subscribe to, like '/basic_controls'
  *  * path (optional) - the base path to any meshes that will be loaded
  *  * camera - the main camera associated with the viewer for this marker client
  *  * rootObject (optional) - the root THREE 3D object to render to
+ *  * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                        ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.InteractiveMarkerClient = function(options) {
   var that = this;
@@ -801,6 +817,7 @@ ROS3D.InteractiveMarkerClient = function(options) {
   this.path = options.path || '/';
   this.camera = options.camera;
   this.rootObject = options.rootObject || new THREE.Object3D();
+  this.loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
   this.interactiveMarkers = {};
   this.updateTopic = null;
@@ -923,7 +940,8 @@ ROS3D.InteractiveMarkerClient.prototype.processUpdate = function(message) {
     var intMarker = new ROS3D.InteractiveMarker({
       handle : handle,
       camera : that.camera,
-      path : that.path
+      path : that.path,
+      loader : that.loader
     });
     // add it to the scene
     intMarker.name = msg.name;
@@ -955,7 +973,7 @@ ROS3D.InteractiveMarkerClient.prototype.processUpdate = function(message) {
 ROS3D.InteractiveMarkerClient.prototype.eraseIntMarker = function(intMarkerName) {
   if (this.interactiveMarkers[intMarkerName]) {
     // remove the object
-    this.rootObject.remove(this.rootObject.getChildByName(intMarkerName));
+    this.rootObject.remove(this.rootObject.getObjectByName(intMarkerName));
     delete this.interactiveMarkers[intMarkerName];
   }
 };
@@ -969,22 +987,26 @@ ROS3D.InteractiveMarkerClient.prototype.eraseIntMarker = function(intMarkerName)
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * parent - the parent of this control
  *  * message - the interactive marker control message
  *  * camera - the main camera associated with the viewer for this marker client
  *  * path (optional) - the base path to any meshes that will be loaded
+ *  * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                        ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.InteractiveMarkerControl = function(options) {
   var that = this;
   THREE.Object3D.call(this);
-  THREE.EventDispatcher.call(this);
 
   options = options || {};
   this.parent = options.parent;
+  var handle = options.handle;
   var message = options.message;
   this.name = message.name;
   this.camera = options.camera;
   this.path = options.path || '/';
+  this.loader = options.loader || ROS3D.COLLADA_LOADER_2;
   this.dragging = false;
 
   // orientation for the control
@@ -1079,7 +1101,6 @@ ROS3D.InteractiveMarkerControl = function(options) {
       break;
     case ROS3D.INTERACTIVE_MARKER_FIXED:
       this.updateMatrixWorld = function(force) {
-        that.useQuaternion = true;
         that.quaternion = that.parent.quaternion.clone().inverse();
         that.updateMatrix();
         that.matrixWorldNeedsUpdate = true;
@@ -1088,15 +1109,15 @@ ROS3D.InteractiveMarkerControl = function(options) {
       };
       break;
     case ROS3D.INTERACTIVE_MARKER_VIEW_FACING:
-      var independentMarkerOrientation = message.independentMarkerOrientation;
+      var independentMarkerOrientation = message.independent_marker_orientation;
       this.updateMatrixWorld = function(force) {
         that.camera.updateMatrixWorld();
         var cameraRot = new THREE.Matrix4().extractRotation(that.camera.matrixWorld);
 
         var ros2Gl = new THREE.Matrix4();
         var r90 = Math.PI * 0.5;
-        var rv = new THREE.Vector3(-r90, 0, r90);
-        ros2Gl.setRotationFromEuler(rv);
+        var rv = new THREE.Euler(-r90, 0, r90);
+        ros2Gl.makeRotationFromEuler(rv);
 
         var worldToLocal = new THREE.Matrix4();
         worldToLocal.getInverse(that.parent.matrixWorld);
@@ -1108,7 +1129,6 @@ ROS3D.InteractiveMarkerControl = function(options) {
 
         // check the orientation
         if (!independentMarkerOrientation) {
-          that.useQuaternion = true;
           that.quaternion.copy(that.currentControlOri);
           that.updateMatrix();
           that.matrixWorldNeedsUpdate = true;
@@ -1121,23 +1141,52 @@ ROS3D.InteractiveMarkerControl = function(options) {
       break;
   }
 
+  // temporary TFClient to get transformations from InteractiveMarker
+  // frame to potential child Marker frames
+  var localTfClient = new ROSLIB.TFClient({
+    ros : handle.tfClient.ros,
+    fixedFrame : handle.message.header.frame_id,
+  });
+
   // create visuals (markers)
   message.markers.forEach(function(markerMsg) {
-    var markerHelper = new ROS3D.Marker({
-      message : markerMsg,
-      path : that.path
-    });
+    var addMarker = function(transformMsg) {
+      var markerHelper = new ROS3D.Marker({
+        message : markerMsg,
+        path : that.path,
+        loader : that.loader
+      });
+      
+      // if transformMsg isn't null, this was called by TFClient
+      if (transformMsg !== null) {
+        // get the current pose as a ROSLIB.Pose...
+        var newPose = new ROSLIB.Pose({
+          position : markerHelper.position,
+          quaternion : markerHelper.quaternion
+        });
+        // so we can apply the transform provided by the TFClient
+        newPose.applyTransform(new ROSLIB.Transform(transformMsg));
+        markerHelper.setPose(newPose);
 
+        markerHelper.updateMatrixWorld();
+        // we only need to set the pose once - at least, this is what RViz seems to be doing, might change in the future
+        localTfClient.unsubscribe(markerMsg.header.frame_id);
+      }
+
+      // add the marker
+      that.add(markerHelper);
+    };
+    
+    // If the marker lives in a separate TF Frame, ask the *local* TFClient
+    // for the transformation from the InteractiveMarker frame to the
+    // sub-Marker frame
     if (markerMsg.header.frame_id !== '') {
-      // if the marker lives in its own coordinate frame, convert position into IM's local frame
-      markerHelper.position.add(posInv);
-      markerHelper.position.applyQuaternion(rotInv);
-      markerHelper.quaternion.multiplyQuaternions(rotInv, markerHelper.quaternion);
-      markerHelper.updateMatrixWorld();
+      localTfClient.subscribe(markerMsg.header.frame_id, addMarker);
     }
-
-    // add the marker
-    that.add(markerHelper);
+    // If not, just add the marker without changing its pose
+    else {
+      addMarker(null);
+    }
   });
 };
 ROS3D.InteractiveMarkerControl.prototype.__proto__ = THREE.Object3D.prototype;
@@ -1150,10 +1199,12 @@ ROS3D.InteractiveMarkerControl.prototype.__proto__ = THREE.Object3D.prototype;
  * Handle with signals for a single interactive marker.
  *
  * Emits the following events:
+ *
  *  * 'pose' - emitted when a new pose comes from the server
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * message - the interactive marker message
  *  * feedbackTopic - the ROSLIB.Topic associated with the feedback
  *  * tfClient - a handle to the TF client to use
@@ -1328,6 +1379,7 @@ ROS3D.InteractiveMarkerHandle.prototype.sendFeedback = function(eventType, click
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * menuEntries - the menu entries to add
  *  * className (optional) - a custom CSS class for the menu div
  *  * entryClassName (optional) - a custom CSS class for the menu entry
@@ -1486,6 +1538,8 @@ ROS3D.InteractiveMarkerMenu.prototype.hide = function(event) {
   document.body.removeChild(this.menuDomElem);
 };
 
+THREE.EventDispatcher.prototype.apply( ROS3D.InteractiveMarkerMenu.prototype );
+
 /**
  * @author Russell Toris - rctoris@wpi.edu
  */
@@ -1495,6 +1549,7 @@ ROS3D.InteractiveMarkerMenu.prototype.hide = function(event) {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * message - the occupancy grid message
  */
 ROS3D.OccupancyGrid = function(options) {
@@ -1567,10 +1622,12 @@ ROS3D.OccupancyGrid.prototype.__proto__ = THREE.Mesh.prototype;
  * An occupancy grid client that listens to a given map topic.
  *
  * Emits the following events:
+ *
  *  * 'change' - there was an update or change in the marker
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * ros - the ROSLIB.Ros connection handle
  *   * topic (optional) - the map topic to listen to
  *   * continuous (optional) - if the map should be continuously loaded (e.g., for SLAM)
@@ -1640,13 +1697,17 @@ ROS3D.OccupancyGridClient.prototype.__proto__ = EventEmitter2.prototype;
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * path - the base path or URL for any mesh files that will be loaded for this marker
  *   * message - the marker message
+ *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.Marker = function(options) {
   options = options || {};
   var path = options.path || '/';
   var message = options.message;
+  var loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
   // check for a trailing '/'
   if (path.substr(path.length - 1) !== '/') {
@@ -1654,7 +1715,6 @@ ROS3D.Marker = function(options) {
   }
 
   THREE.Object3D.call(this);
-  this.useQuaternion = true;
 
   // set the pose and get the color
   this.setPose(message.pose);
@@ -1715,7 +1775,6 @@ ROS3D.Marker = function(options) {
       // set the cylinder dimensions
       var cylinderGeom = new THREE.CylinderGeometry(0.5, 0.5, 1, 16, 1, false);
       var cylinderMesh = new THREE.Mesh(cylinderGeom, colorMaterial);
-      cylinderMesh.useQuaternion = true;
       cylinderMesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * 0.5);
       cylinderMesh.scale = new THREE.Vector3(message.scale.x, message.scale.z, message.scale.y);
       this.add(cylinderMesh);
@@ -1847,28 +1906,31 @@ ROS3D.Marker = function(options) {
       this.add(new THREE.ParticleSystem(geometry, material));
       break;
     case ROS3D.MARKER_TEXT_VIEW_FACING:
-      // setup the text
-      var textGeo = new THREE.TextGeometry(message.text, {
-        size : message.scale.x * 0.5,
-        height : 0.1 * message.scale.x,
-        curveSegments : 4,
-        font : 'helvetiker',
-        bevelEnabled : false,
-        bevelThickness : 2,
-        bevelSize : 2,
-        material : 0,
-        extrudeMaterial : 0
-      });
-      textGeo.computeVertexNormals();
-      textGeo.computeBoundingBox();
+      // only work on non-empty text
+      if (message.text.length > 0) {
+        // setup the text
+        var textGeo = new THREE.TextGeometry(message.text, {
+          size: message.scale.x * 0.5,
+          height: 0.1 * message.scale.x,
+          curveSegments: 4,
+          font: 'helvetiker',
+          bevelEnabled: false,
+          bevelThickness: 2,
+          bevelSize: 2,
+          material: 0,
+          extrudeMaterial: 0
+        });
+        textGeo.computeVertexNormals();
+        textGeo.computeBoundingBox();
 
-      // position the text and add it
-      var mesh = new THREE.Mesh(textGeo, colorMaterial);
-      var centerOffset = -0.5 * (textGeo.boundingBox.max.x - textGeo.boundingBox.min.x);
-      mesh.position.y = -centerOffset;
-      mesh.rotation.x = Math.PI * 0.5;
-      mesh.rotation.y = Math.PI * 1.5;
-      this.add(mesh);
+        // position the text and add it
+        var mesh = new THREE.Mesh(textGeo, colorMaterial);
+        var centerOffset = -0.5 * (textGeo.boundingBox.max.x - textGeo.boundingBox.min.x);
+        mesh.position.y = -centerOffset;
+        mesh.rotation.x = Math.PI * 0.5;
+        mesh.rotation.y = Math.PI * 1.5;
+        this.add(mesh);
+      }
       break;
     case ROS3D.MARKER_MESH_RESOURCE:
       // load and add the mesh
@@ -1900,9 +1962,10 @@ ROS3D.Marker = function(options) {
       }
       console.log('meshPath = ' + meshPath + '; resourceLocation = ' + resourceLocation);
       var meshResource = new ROS3D.MeshResource({
-        path : meshPath,
-        resource : resourceLocation,
-        material : meshColorMaterial
+        path : path,
+        resource : message.mesh_resource.substr(10),
+        material : meshColorMaterial,
+        loader : loader
       });
       meshResource.scale = new THREE.Vector3(message.scale.x, message.scale.y, message.scale.z);
       this.add(meshResource);
@@ -2046,21 +2109,94 @@ ROS3D.MarkerArrayClient.prototype.__proto__ = EventEmitter2.prototype;
 
 /**
  * @author Russell Toris - rctoris@wpi.edu
- * @author Ellis Ratner - eratner@bowdoin.edu
+ * @author Nils Berg - berg.nils@gmail.com
+ */
+
+/**
+ * A MarkerArray client that listens to a given topic.
+ *
+ * Emits the following events:
+ *
+ *  * 'change' - there was an update or change in the MarkerArray
+ *
+ * @constructor
+ * @param options - object with following keys:
+ *
+ *   * ros - the ROSLIB.Ros connection handle
+ *   * topic - the marker topic to listen to
+ *   * tfClient - the TF client handle to use
+ *   * rootObject (optional) - the root object to add the markers to
+ *   * path (optional) - the base path to any meshes that will be loaded
+ *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
+ */
+ROS3D.MarkerArrayClient = function(options) {
+  var that = this;
+  options = options || {};
+  var ros = options.ros;
+  var topic = options.topic;
+  this.tfClient = options.tfClient;
+  this.rootObject = options.rootObject || new THREE.Object3D();
+  this.path = options.path || '/';
+  this.loader = options.loader || ROS3D.COLLADA_LOADER_2;
+
+  // Markers that are displayed (Map ns+id--Marker)
+  this.markers = {};
+
+  // subscribe to MarkerArray topic
+  var arrayTopic = new ROSLIB.Topic({
+    ros : ros,
+    name : topic,
+    messageType : 'visualization_msgs/MarkerArray',
+    compression : 'png'
+  });
+  
+  arrayTopic.subscribe(function(arrayMessage) {
+
+    arrayMessage.markers.forEach(function(message) {
+      var newMarker = new ROS3D.Marker({
+        message : message,
+        path : that.path,
+        loader : that.loader
+      });
+
+      // remove old marker from Three.Object3D children buffer
+      that.rootObject.remove(that.markers[message.ns + message.id]);
+
+      that.markers[message.ns + message.id] = new ROS3D.SceneNode({
+        frameID : message.header.frame_id,
+        tfClient : that.tfClient,
+        object : newMarker
+      });
+      that.rootObject.add(that.markers[message.ns + message.id]);
+    });
+    
+    that.emit('change');
+  });
+};
+ROS3D.MarkerArrayClient.prototype.__proto__ = EventEmitter2.prototype;
+
+/**
+ * @author Russell Toris - rctoris@wpi.edu
  */
 
 /**
  * A marker client that listens to a given marker topic.
  *
  * Emits the following events:
- *  * 'change' - there was an update or change in the markers
+ *
+ *  * 'change' - there was an update or change in the marker
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * ros - the ROSLIB.Ros connection handle
  *   * topic - the marker topic to listen to
  *   * tfClient - the TF client handle to use
- *   * rootObject (optional) - the root object to add markers to
+ *   * rootObject (optional) - the root object to add this marker to
+ *   * path (optional) - the base path to any meshes that will be loaded
+ *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.MarkerClient = function(options) {
   var that = this;
@@ -2069,9 +2205,11 @@ ROS3D.MarkerClient = function(options) {
   var topic = options.topic;
   this.tfClient = options.tfClient;
   this.rootObject = options.rootObject || new THREE.Object3D();
+  this.path = options.path || '/';
+  this.loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
-  // a dictionary of the currently displayed markers
-  this.currentMarkers = [];
+  // Markers that are displayed (Map ns+id--Marker)
+  this.markers = {};
 
   // subscribe to the topic
   var rosTopic = new ROSLIB.Topic({
@@ -2145,9 +2283,23 @@ ROS3D.MarkerClient = function(options) {
           }
 	}
 
-	that.emit('change');
-      }
-    }
+    var newMarker = new ROS3D.Marker({
+      message : message,
+      path : that.path,
+      loader : that.loader
+    });
+
+    // remove old marker from Three.Object3D children buffer
+    that.rootObject.remove(that.markers[message.ns + message.id]);
+
+    that.markers[message.ns + message.id] = new ROS3D.SceneNode({
+      frameID : message.header.frame_id,
+      tfClient : that.tfClient,
+      object : newMarker
+    });
+    that.rootObject.add(that.markers[message.ns + message.id]);
+
+    that.emit('change');
   });
 };
 ROS3D.MarkerClient.prototype.__proto__ = EventEmitter2.prototype;
@@ -2161,6 +2313,7 @@ ROS3D.MarkerClient.prototype.__proto__ = EventEmitter2.prototype;
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * origin (optional) - the origin of the arrow
  *   * direction (optional) - the direction vector of the arrow
  *   * length (optional) - the length of the arrow
@@ -2212,7 +2365,7 @@ ROS3D.Arrow.prototype.setDirection = function(direction) {
   var axis = new THREE.Vector3(0, 1, 0).cross(direction);
   var radians = Math.acos(new THREE.Vector3(0, 1, 0).dot(direction.clone().normalize()));
   this.matrix = new THREE.Matrix4().makeRotationAxis(axis.normalize(), radians);
-  this.rotation.setEulerFromRotationMatrix(this.matrix, this.eulerOrder);
+  this.rotation.setFromRotationMatrix(this.matrix, this.rotation.order);
 };
 
 /**
@@ -2243,6 +2396,7 @@ ROS3D.Arrow.prototype.setColor = function(hex) {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * shaftRadius (optional) - the radius of the shaft to render
  *   * headRadius (optional) - the radius of the head to render
  *   * headLength (optional) - the length of the head to render
@@ -2283,7 +2437,6 @@ ROS3D.Axes = function(options) {
     var arrow = new THREE.Mesh(that.headGeom, material);
     arrow.position = axis.clone();
     arrow.position.multiplyScalar(0.95);
-    arrow.useQuaternion = true;
     arrow.quaternion = rot;
     arrow.updateMatrix();
     that.add(arrow);
@@ -2292,7 +2445,6 @@ ROS3D.Axes = function(options) {
     var line = new THREE.Mesh(that.lineGeom, material);
     line.position = axis.clone();
     line.position.multiplyScalar(0.45);
-    line.useQuaternion = true;
     line.quaternion = rot;
     line.updateMatrix();
     that.add(line);
@@ -2314,6 +2466,7 @@ ROS3D.Axes.prototype.__proto__ = THREE.Object3D.prototype;
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * size (optional) - The number of cells of the grid
  *  * color (optional) - the line color of the grid, like '#cccccc'
  *  * lineWidth (optional) - the width of the lines in the grid
@@ -2326,16 +2479,32 @@ ROS3D.Grid = function(options) {
   var lineWidth = options.lineWidth || 1;
   var cellSize = options.cellSize || 1;
 
-  // create the mesh
-  THREE.Mesh.call(this, new THREE.PlaneGeometry(size*cellSize, size*cellSize, size, size),
-      new THREE.MeshBasicMaterial({
-        color : color,
-        wireframe : true,
-        wireframeLinewidth : lineWidth,
-        transparent : true
-      }));
+  THREE.Object3D.call(this);
+
+  var material = new THREE.LineBasicMaterial({
+    color: color,
+    linewidth: lineWidth
+  });
+
+  for (var i = 0; i <= size; ++i) {
+    var edge = cellSize * size / 2;
+    var position = edge - (i * cellSize);
+    var geometryH = new THREE.Geometry();
+    geometryH.vertices.push(
+      new THREE.Vector3( -edge, position, 0 ),
+      new THREE.Vector3( edge, position, 0 )
+    );
+    var geometryV = new THREE.Geometry();
+    geometryV.vertices.push(
+      new THREE.Vector3( position, -edge, 0 ),
+      new THREE.Vector3( position, edge, 0 )
+    );
+    this.add(new THREE.Line(geometryH, material));
+    this.add(new THREE.Line(geometryV, material));
+  }
 };
-ROS3D.Grid.prototype.__proto__ = THREE.Mesh.prototype;
+
+ROS3D.Grid.prototype.__proto__ = THREE.Object3D.prototype;
 
 /**
  * @author Jihoon Lee - jihoonlee.in@gmail.com
@@ -2348,10 +2517,13 @@ ROS3D.Grid.prototype.__proto__ = THREE.Mesh.prototype;
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * path (optional) - the base path to the associated models that will be loaded
  *  * resource - the resource file name to load
  *  * material (optional) - the material to use for the object
  *  * warnings (optional) - if warnings should be printed
+ *  * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                        ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.MeshResource = function(options) {
   var that = this;
@@ -2360,6 +2532,7 @@ ROS3D.MeshResource = function(options) {
   var resource = options.resource;
   var material = options.material || null;
   this.warnings = options.warnings;
+  var loaderType = options.loader || ROS3D.COLLADA_LOADER_2;
 
   THREE.Object3D.call(this);
 
@@ -2373,18 +2546,20 @@ ROS3D.MeshResource = function(options) {
 
   // check the type
   if (uri.substr(-4).toLowerCase() === '.dae') {
-    if(!ROS3D.ColladaLoader) {
-      ROS3D.ColladaLoader = new ColladaLoader2();
+    var loader;
+    if (loaderType ===  ROS3D.COLLADA_LOADER) {
+      loader = new THREE.ColladaLoader();
+    } else {
+      loader = new ColladaLoader2();
     }
-    var loader = ROS3D.ColladaLoader;
     loader.log = function(message) {
       if (that.warnings) {
         console.warn(message);
       }
     };
     loader.load(uri, function colladaReady(collada) {
-      // check for a scale factor
-      if(collada.dae.asset.unit) {
+      // check for a scale factor in ColladaLoader2
+      if(loaderType === ROS3D.COLLADA_LOADER_2 && collada.dae.asset.unit) {
         var scale = collada.dae.asset.unit;
         collada.scene.scale = new THREE.Vector3(scale, scale, scale);
       }
@@ -2418,6 +2593,7 @@ ROS3D.MeshResource.prototype.__proto__ = THREE.Object3D.prototype;
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * material (optional) - the material to use for the object
  *   * vertices - the array of vertices to use
  *   * colors - the associated array of colors to use
@@ -2497,10 +2673,13 @@ ROS3D.TriangleList.prototype.setColor = function(hex) {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * urdfModel - the ROSLIB.UrdfModel to load
  *   * tfClient - the TF client handle to use
  *   * path (optional) - the base path to the associated Collada models that will be loaded
  *   * tfPrefix (optional) - the TF prefix to used for multi-robots
+ *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.Urdf = function(options) {
   options = options || {};
@@ -2508,9 +2687,9 @@ ROS3D.Urdf = function(options) {
   var path = options.path || '/';
   var tfClient = options.tfClient;
   var tfPrefix = options.tfPrefix || '';
+  var loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
   THREE.Object3D.call(this);
-  this.useQuaternion = true;
 
   // load all models
   var links = urdfModel.links;
@@ -2527,7 +2706,8 @@ ROS3D.Urdf = function(options) {
           // create the model
           var mesh = new ROS3D.MeshResource({
             path : path,
-            resource : uri.substring(10)
+            resource : uri.substring(10),
+            loader : loader
           });
           
           // check for a scale
@@ -2571,7 +2751,6 @@ ROS3D.Urdf = function(options) {
                 var length = link.visual.geometry.length;
                 var cylinder = new THREE.CylinderGeometry(radius, radius, length, 16, 1, false);
                 shapeMesh = new THREE.Mesh(cylinder, colorMaterial);
-                shapeMesh.useQuaternion = true;
                 shapeMesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * 0.5);
                 break;
             case ROSLIB.URDF_SPHERE:
@@ -2603,16 +2782,20 @@ ROS3D.Urdf.prototype.__proto__ = THREE.Object3D.prototype;
  * parameter server.
  *
  * Emits the following events:
+ *
  * * 'change' - emited after the URDF and its meshes have been loaded into the root object
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * ros - the ROSLIB.Ros connection handle
  *   * param (optional) - the paramter to load the URDF from, like 'robot_description'
  *   * tfClient - the TF client handle to use
  *   * path (optional) - the base path to the associated Collada models that will be loaded
  *   * rootObject (optional) - the root object to add this marker to
  *   * tfPrefix (optional) - the TF prefix to used for multi-robots
+ *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.UrdfClient = function(options) {
   var that = this;
@@ -2623,6 +2806,7 @@ ROS3D.UrdfClient = function(options) {
   this.tfClient = options.tfClient;
   this.rootObject = options.rootObject || new THREE.Object3D();
   var tfPrefix = options.tfPrefix || '';
+  var loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
   // get the URDF value from ROS
   var getParam = new ROSLIB.Param({
@@ -2640,7 +2824,8 @@ ROS3D.UrdfClient = function(options) {
       urdfModel : urdfModel,
       path : that.path,
       tfClient : that.tfClient,
-      tfPrefix : tfPrefix
+      tfPrefix : tfPrefix,
+      loader : loader
     }));
   });
 };
@@ -2723,6 +2908,7 @@ ROS3D.limitLoop = function (fn, fps) {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * tfClient - a handle to the TF client
  *  * frameID - the frame ID this object belongs to
  *  * pose (optional) - the pose associated with this object
@@ -2737,7 +2923,6 @@ ROS3D.SceneNode = function(options) {
   this.pose = options.pose || new ROSLIB.Pose();
 
   THREE.Object3D.call(this);
-  this.useQuaternion = true;
 
   // add the model
   this.add(object);
@@ -2793,6 +2978,7 @@ ROS3D.SceneNode.prototype.updatePose = function(pose) {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * divID - the ID of the div to place the viewer in
  *  * width - the initial width, in pixels, of the canvas
  *  * height - the initial height, in pixels, of the canvas
@@ -2820,7 +3006,7 @@ ROS3D.Viewer = function(options) {
   this.renderer = new THREE.WebGLRenderer({
     antialias : this.antialias
   });
-  this.renderer.setClearColorHex(background.replace('#', '0x'), 1.0);
+  this.renderer.setClearColor(background.replace('#', '0x'), 1.0);
   this.renderer.sortObjects = false;
   this.renderer.setSize(width, height);
   this.renderer.shadowMapEnabled = false;
@@ -2912,6 +3098,7 @@ ROS3D.Viewer.prototype.addObject = function(object, selectable) {
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * mouseHandler - the handler for the mouseover and mouseout events
  */
 ROS3D.Highlighter = function(options) {
@@ -3008,6 +3195,7 @@ ROS3D.Highlighter.prototype.renderHighlight = function(renderer, scene, camera) 
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * renderer - the main renderer
  *   * camera - the main camera in the scene
  *   * rootObject - the root object to check for mouse events
@@ -3195,6 +3383,8 @@ ROS3D.MouseHandler.prototype.notify = function(target, type, event3D) {
   return false;
 };
 
+THREE.EventDispatcher.prototype.apply( ROS3D.MouseHandler.prototype );
+
 /**
  * @author David Gossow - dgossow@willowgarage.com
  * @author Xueqiao Xu - xueqiaoxu@gmail.com
@@ -3303,7 +3493,7 @@ ROS3D.OrbitControls = function(options) {
   }
 
   /**
-   * Handle the movemove 3D event.
+   * Handle the mousemove 3D event.
    *
    * @param event3D - the 3D event to handle
    */
@@ -3477,7 +3667,7 @@ ROS3D.OrbitControls = function(options) {
       zoomEnd.set((event.changedTouches[0].pageX - event.changedTouches[1].pageX)*(event.changedTouches[0].pageX - event.changedTouches[1].pageX), (event.changedTouches[0].pageY - event.changedTouches[1].pageY)*(event.changedTouches[0].pageY - event.changedTouches[1].pageY));
       zoomDelta.subVectors(zoomEnd, zoomStart);
 
-      if (zoomDelta.y > 0) {
+      if (zoomDelta.y + zoomDelta.x > 0) {
         that.zoomOut();
       } else {
         that.zoomIn();
@@ -3661,3 +3851,5 @@ ROS3D.OrbitControls.prototype.update = function() {
     this.lastPosition.copy(this.camera.position);
   }
 };
+
+THREE.EventDispatcher.prototype.apply( ROS3D.OrbitControls.prototype );

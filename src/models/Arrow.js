@@ -7,6 +7,7 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * origin (optional) - the origin of the arrow
  *   * direction (optional) - the direction vector of the arrow
  *   * length (optional) - the length of the arrow
@@ -58,7 +59,7 @@ ROS3D.Arrow.prototype.setDirection = function(direction) {
   var axis = new THREE.Vector3(0, 1, 0).cross(direction);
   var radians = Math.acos(new THREE.Vector3(0, 1, 0).dot(direction.clone().normalize()));
   this.matrix = new THREE.Matrix4().makeRotationAxis(axis.normalize(), radians);
-  this.rotation.setEulerFromRotationMatrix(this.matrix, this.eulerOrder);
+  this.rotation.setFromRotationMatrix(this.matrix, this.rotation.order);
 };
 
 /**

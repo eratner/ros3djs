@@ -8,6 +8,7 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *  * tfClient - a handle to the TF client
  *  * frameID - the frame ID this object belongs to
  *  * pose (optional) - the pose associated with this object
@@ -22,7 +23,6 @@ ROS3D.SceneNode = function(options) {
   this.pose = options.pose || new ROSLIB.Pose();
 
   THREE.Object3D.call(this);
-  this.useQuaternion = true;
 
   // add the model
   this.add(object);

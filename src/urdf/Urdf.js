@@ -8,10 +8,13 @@
  *
  * @constructor
  * @param options - object with following keys:
+ *
  *   * urdfModel - the ROSLIB.UrdfModel to load
  *   * tfClient - the TF client handle to use
  *   * path (optional) - the base path to the associated Collada models that will be loaded
  *   * tfPrefix (optional) - the TF prefix to used for multi-robots
+ *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+ *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
  */
 ROS3D.Urdf = function(options) {
   options = options || {};
@@ -19,9 +22,9 @@ ROS3D.Urdf = function(options) {
   var path = options.path || '/';
   var tfClient = options.tfClient;
   var tfPrefix = options.tfPrefix || '';
+  var loader = options.loader || ROS3D.COLLADA_LOADER_2;
 
   THREE.Object3D.call(this);
-  this.useQuaternion = true;
 
   // load all models
   var links = urdfModel.links;
@@ -38,7 +41,8 @@ ROS3D.Urdf = function(options) {
           // create the model
           var mesh = new ROS3D.MeshResource({
             path : path,
-            resource : uri.substring(10)
+            resource : uri.substring(10),
+            loader : loader
           });
           
           // check for a scale
@@ -82,7 +86,6 @@ ROS3D.Urdf = function(options) {
                 var length = link.visual.geometry.length;
                 var cylinder = new THREE.CylinderGeometry(radius, radius, length, 16, 1, false);
                 shapeMesh = new THREE.Mesh(cylinder, colorMaterial);
-                shapeMesh.useQuaternion = true;
                 shapeMesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * 0.5);
                 break;
             case ROSLIB.URDF_SPHERE:

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>JSDoc: Class: Grid</title>
+    <title>JSDoc: Class: MarkerArrayClient</title>
     
     <script src="scripts/prettify/prettify.js"> </script>
     <script src="scripts/prettify/lang-css.js"> </script>
@@ -17,7 +17,7 @@
 
 <div id="main">
     
-    <h1 class="page-title">Class: Grid</h1>
+    <h1 class="page-title">Class: MarkerArrayClient</h1>
     
     
 
@@ -29,7 +29,7 @@
     <h2>
         <span class="ancestors"><a href="global.html#ROS3D">ROS3D</a>.</span>
     
-    Grid
+    MarkerArrayClient
     </h2>
     
 </header>  
@@ -41,7 +41,7 @@
     
         
 <dt>
-    <h4 class="name" id="Grid"><span class="type-signature"></span>new Grid<span class="signature">(options)</span><span class="type-signature"></span></h4>
+    <h4 class="name" id="MarkerArrayClient"><span class="type-signature"></span>new MarkerArrayClient<span class="signature">(options)</span><span class="type-signature"></span></h4>
     
     
 </dt>
@@ -49,7 +49,13 @@
     
     
     <div class="description">
-        <p>Create a grid object.</p>
+        <p>A MarkerArray client that listens to a given topic.</p>
+
+<p>Emits the following events:</p>
+
+<ul>
+<li>'change' - there was an update or change in the MarkerArray</li>
+</ul>
     </div>
     
 
@@ -97,10 +103,13 @@
             <td class="description last"><p>object with following keys:</p>
 
 <ul>
-<li>size (optional) - The number of cells of the grid</li>
-<li>color (optional) - the line color of the grid, like '#cccccc'</li>
-<li>lineWidth (optional) - the width of the lines in the grid</li>
-<li>cellSize (optional) - The length, in meters, of the side of each cell</li>
+<li>ros - the ROSLIB.Ros connection handle</li>
+<li>topic - the marker topic to listen to</li>
+<li>tfClient - the TF client handle to use</li>
+<li>rootObject (optional) - the root object to add the markers to</li>
+<li>path (optional) - the base path to any meshes that will be loaded</li>
+<li>loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
+                    ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2</li>
 </ul></td>
         </tr>
 	
@@ -132,7 +141,7 @@
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        models/Grid.js, line 16
+        markers/MarkerArrayClient.js, line 24
     </li></ul></dd>
     
     
